@@ -10,12 +10,51 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
 const transcribe = new TranscribeClient({ region });
 const table = process.env.JOBS_TABLE;
 const bucket = process.env.UPLOAD_BUCKET;
+const COMPLETION_LEASE_SECONDS = 600;
 
-async function readSubtitle(uri) {
-  if (!uri) throw new Error('Amazon Transcribe did not return an SRT subtitle URI.');
-  const response = await fetch(uri);
-  if (!response.ok) throw new Error(`Unable to download Transcribe SRT: HTTP ${response.status}`);
-  return response.text();
+function isConditionalFailure(error) {
+  return error?.name === 'ConditionalCheckFailedException';
+}
+
+async function claimCompletion(jobId) {
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    const result = await ddb.send(new UpdateCommand({
+      TableName: table,
+      Key: { jobId },
+      UpdateExpression: 'SET #status = :processing, completionLeaseUntil = :lease, updatedAt = :updated',
+      ConditionExpression: '#status = :transcribing OR (#status = :processing AND (attribute_not_exists(completionLeaseUntil) OR completionLeaseUntil < :now))',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':transcribing': 'TRANSCRIBING',
+        ':processing': 'COMPLETING',
+        ':lease': now + COMPLETION_LEASE_SECONDS,
+        ':now': now,
+        ':updated': new Date().toISOString()
+      },
+      ReturnValues: 'ALL_NEW'
+    }));
+    return result.Attributes || null;
+  } catch (error) {
+    if (isConditionalFailure(error)) return null;
+    throw error;
+  }
+}
+
+async function markFailed(jobId, message) {
+  await ddb.send(new UpdateCommand({
+    TableName: table,
+    Key: { jobId },
+    UpdateExpression: 'SET #status = :failed, errorMessage = :message, updatedAt = :now REMOVE completionLeaseUntil',
+    ConditionExpression: '#status = :processing',
+    ExpressionAttributeNames: { '#status': 'status' },
+    ExpressionAttributeValues: {
+      ':failed': 'FAILED',
+      ':processing': 'COMPLETING',
+      ':message': message,
+      ':now': new Date().toISOString()
+    }
+  }));
 }
 
 export const handler = async (event) => {
@@ -29,22 +68,23 @@ export const handler = async (event) => {
   }
 
   const jobId = transcribeJobName.replace(/^aws-ts-/, '');
+  if (!jobId || jobId === transcribeJobName) {
+    console.warn('Ignoring Transcribe event with an unexpected job name', transcribeJobName);
+    return;
+  }
+
   const result = await ddb.send(new GetCommand({ TableName: table, Key: { jobId } }));
-  const job = result.Item;
-  if (!job || job.status === 'COMPLETED' || job.status === 'FAILED') return;
+  const existing = result.Item;
+  if (!existing || ['COMPLETED', 'FAILED'].includes(existing.status)) return;
+
+  const job = await claimCompletion(jobId);
+  if (!job) {
+    console.log('Completion is already claimed or finalized', { jobId, status: existing.status });
+    return;
+  }
 
   if (transcribeStatus === 'FAILED') {
-    await ddb.send(new UpdateCommand({
-      TableName: table,
-      Key: { jobId },
-      UpdateExpression: 'SET #status = :status, errorMessage = :message, updatedAt = :now',
-      ExpressionAttributeNames: { '#status': 'status' },
-      ExpressionAttributeValues: {
-        ':status': 'FAILED',
-        ':message': detail.FailureReason || 'Amazon Transcribe could not process this file.',
-        ':now': new Date().toISOString()
-      }
-    }));
+    await markFailed(jobId, detail.FailureReason || 'Amazon Transcribe could not process this file.');
     return;
   }
 
@@ -76,10 +116,12 @@ export const handler = async (event) => {
     await ddb.send(new UpdateCommand({
       TableName: table,
       Key: { jobId },
-      UpdateExpression: 'SET #status = :status, sourceLanguageDetected = :language, originalSrtKey = :original, thaiSrtKey = :thai, updatedAt = :now',
+      UpdateExpression: 'SET #status = :status, sourceLanguageDetected = :language, originalSrtKey = :original, thaiSrtKey = :thai, updatedAt = :now REMOVE completionLeaseUntil',
+      ConditionExpression: '#status = :processing',
       ExpressionAttributeNames: { '#status': 'status' },
       ExpressionAttributeValues: {
         ':status': 'COMPLETED',
+        ':processing': 'COMPLETING',
         ':language': sourceLanguage,
         ':original': originalKey,
         ':thai': thaiKey,
@@ -87,18 +129,30 @@ export const handler = async (event) => {
       }
     }));
   } catch (error) {
-    console.error('Transcribe completion processing failed', { jobId, error });
-    await ddb.send(new UpdateCommand({
-      TableName: table,
-      Key: { jobId },
-      UpdateExpression: 'SET #status = :status, errorMessage = :message, updatedAt = :now',
-      ExpressionAttributeNames: { '#status': 'status' },
-      ExpressionAttributeValues: {
-        ':status': 'FAILED',
-        ':message': 'Transcription finished, but subtitle export or Thai translation failed. Please retry this job.',
-        ':now': new Date().toISOString()
-      }
-    }));
+    console.error('Transcribe completion processing failed; allowing EventBridge retry', { jobId, error });
+    try {
+      await ddb.send(new UpdateCommand({
+        TableName: table,
+        Key: { jobId },
+        UpdateExpression: 'SET #status = :transcribing, updatedAt = :now REMOVE completionLeaseUntil',
+        ConditionExpression: '#status = :processing',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':transcribing': 'TRANSCRIBING',
+          ':processing': 'COMPLETING',
+          ':now': new Date().toISOString()
+        }
+      }));
+    } catch (releaseError) {
+      console.error('Unable to release completion lease; it will expire automatically', { jobId, releaseError });
+    }
     throw error;
   }
 };
+
+async function readSubtitle(uri) {
+  if (!uri) throw new Error('Amazon Transcribe did not return an SRT subtitle URI.');
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error(`Unable to download Transcribe SRT: HTTP ${response.status}`);
+  return response.text();
+}
