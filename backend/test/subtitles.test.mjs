@@ -24,7 +24,8 @@ test('returns an empty list for an empty subtitle file', () => {
 });
 
 test('rejects malformed blocks instead of silently dropping subtitle dialogue', () => {
-  assert.throws(() => parseSrt('1\nThis block has no timestamp\n\n2\n00:00:02,000 --> 00:00:01,000\nReversed'), /missing timestamp|reversed timestamps/);
+  assert.throws(() => parseSrt('1\nThis block has no timestamp'), /missing timestamp/);
+  assert.throws(() => parseSrt('1\n00:00:02,000 --> 00:00:01,000\nReversed'), /invalid or reversed timestamps/);
   assert.throws(() => parseSrt('1\n00:99:01,000 --> 00:99:02,000\nInvalid time'), /invalid or reversed timestamps/);
 });
 
