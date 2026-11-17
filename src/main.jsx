@@ -3,14 +3,101 @@ import JSZip from 'jszip';
 import { createRoot } from 'react-dom/client';
 import { AudioLines, Check, ChevronDown, Clock3, CloudUpload, Download, FileAudio, FileVideo, Languages, ListMusic, LoaderCircle, Play, Plus, Settings2, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react';
 import './styles.css';
+import { authConfigured, registerAccount, confirmAccount, signIn, refreshSession, tokenExpired } from './auth.mjs';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/[/]+$/, '');
+
+const REGION = import.meta.env.VITE_COGNITO_REGION || (import.meta.env.VITE_COGNITO_USER_POOL_ID || '').split('_')[0];
+const USER_POOL_ID = import.meta.env.VITE_COGNITO_USER_POOL_ID || '';
+const CLIENT_ID = import.meta.env.VITE_COGNITO_CLIENT_ID || '';
+
+export const authConfigured = Boolean(REGION && USER_POOL_ID && CLIENT_ID);
+
+async function cognito(target, payload) {
+  if (!authConfigured) throw new Error('ยังไม่ได้ตั้งค่า Cognito ในตัวแปร VITE_COGNITO_REGION, VITE_COGNITO_USER_POOL_ID และ VITE_COGNITO_CLIENT_ID');
+  const response = await fetch(`https://cognito-idp.${REGION}.amazonaws.com/`, {
+    method:'POST',
+    headers:{'content-type':'application/x-amz-json-1.1','x-amz-target':`AWSCognitoIdentityProviderService.${target}`},
+    body:JSON.stringify(payload)
+  });
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok) throw new Error(data.message || data.Message || 'Cognito request failed');
+  return data;
+}
+
+export async function registerAccount(email, password) {
+  return cognito('SignUp',{ClientId:CLIENT_ID,Username:email,Password:password,UserAttributes:[{Name:'email',Value:email}]});
+}
+export async function confirmAccount(email, code) {
+  return cognito('ConfirmSignUp',{ClientId:CLIENT_ID,Username:email,ConfirmationCode:code});
+}
+export async function signIn(email, password) {
+  const result = await cognito('InitiateAuth',{AuthFlow:'USER_PASSWORD_AUTH',ClientId:CLIENT_ID,AuthParameters:{USERNAME:email,PASSWORD:password}});
+  if (!result.AuthenticationResult?.IdToken) throw new Error('เข้าสู่ระบบไม่สำเร็จ: ไม่ได้รับ ID token');
+  return {idToken:result.AuthenticationResult.IdToken,accessToken:result.AuthenticationResult.AccessToken,refreshToken:result.AuthenticationResult.RefreshToken || ''};
+}
+export async function refreshSession(session) {
+  if (!session?.refreshToken) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง');
+  const result = await cognito('InitiateAuth',{AuthFlow:'REFRESH_TOKEN_AUTH',ClientId:CLIENT_ID,AuthParameters:{REFRESH_TOKEN:session.refreshToken}});
+  if (!result.AuthenticationResult?.IdToken) throw new Error('ต่ออายุเซสชันไม่สำเร็จ');
+  return {...session,idToken:result.AuthenticationResult.IdToken,accessToken:result.AuthenticationResult.AccessToken};
+}
+export function tokenExpired(token) {
+  try { const payload=JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return !payload.exp || payload.exp*1000 < Date.now()+60000; }
+  catch { return true; }
+}
+
+function AuthPanel({onAuthenticated}) {
+  const [mode,setMode]=useState('login');
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [code,setCode]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [message,setMessage]=useState('');
+  const [pendingConfirmation,setPendingConfirmation]=useState(false);
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setMessage('');
+    try {
+      if (pendingConfirmation) {
+        await confirmAccount(email.trim(),code.trim());
+        setPendingConfirmation(false); setMode('login'); setMessage('ยืนยันอีเมลสำเร็จ กรุณาเข้าสู่ระบบ');
+      } else if (mode==='register') {
+        const result=await registerAccount(email.trim(),password);
+        if (result.UserConfirmed) { setMode('login'); setMessage('สมัครสมาชิกสำเร็จ กรุณาเข้าสู่ระบบ'); }
+        else { setPendingConfirmation(true); setMessage('ส่งรหัสยืนยันไปยังอีเมลแล้ว กรุณากรอกรหัส'); }
+      } else {
+        const session=await signIn(email.trim(),password);
+        localStorage.setItem('aws-transcribe.session',JSON.stringify(session));
+        onAuthenticated(session);
+      }
+    } catch(error) { setMessage(error.message || 'เกิดข้อผิดพลาด'); }
+    finally { setBusy(false); }
+  }
+  return <main className="shell auth-shell">
+    <header className="topbar"><a className="brand" href="#"><span className="brand-icon"><AudioLines size={21}/></span><span>AWS <b>Transcribe</b><small>STUDIO</small></span></a></header>
+    <section className="hero"><div className="eyebrow"><span className="live-dot"/> PRIVATE WORKSPACE</div><h1>เข้าสู่พื้นที่<br/><span>ทำงานส่วนตัว</span></h1><p>บัญชีผู้ใช้ช่วยแยกคิวงานและไฟล์ของแต่ละคน</p></section>
+    <form className="auth-card" onSubmit={submit}>
+      <div className="section-heading"><div><span className="eyebrow">ACCOUNT</span><h2>{pendingConfirmation?'ยืนยันอีเมล':mode==='register'?'สร้างบัญชี':'เข้าสู่ระบบ'}</h2></div></div>
+      <label>อีเมล<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@example.com"/></label>
+      {!pendingConfirmation && <label>รหัสผ่าน<input type="password" autoComplete={mode==='register'?'new-password':'current-password'} minLength={10} required value={password} onChange={e=>setPassword(e.target.value)} placeholder="อย่างน้อย 10 ตัวอักษร"/></label>}
+      {pendingConfirmation && <label>รหัสยืนยัน<input inputMode="numeric" required value={code} onChange={e=>setCode(e.target.value)} placeholder="รหัสจากอีเมล"/></label>}
+      <button className="primary-button auth-submit" disabled={busy || !authConfigured}>{busy?'กำลังดำเนินการ…':pendingConfirmation?'ยืนยันอีเมล':mode==='register'?'สมัครสมาชิก':'เข้าสู่ระบบ'}</button>
+      {!authConfigured && <p className="auth-warning">ยังไม่ได้ตั้งค่า Cognito สำหรับเว็บ ต้องกำหนด VITE_COGNITO_REGION, VITE_COGNITO_USER_POOL_ID และ VITE_COGNITO_CLIENT_ID ก่อนใช้งานระบบบัญชี</p>}
+      {message && <p className="auth-message" role="status">{message}</p>}
+      {!pendingConfirmation && <button type="button" className="text-button auth-toggle" onClick={()=>{setMode(mode==='login'?'register':'login');setMessage('');}}>{mode==='login'?'ยังไม่มีบัญชี? สมัครสมาชิก':'มีบัญชีแล้ว? เข้าสู่ระบบ'}</button>}
+    </form>
+    <footer><div className="footer-mark"><ShieldCheck size={17}/> ระบบบัญชีและพื้นที่ส่วนตัว</div><span>ไม่เปิดเผยไฟล์งานต่อผู้ใช้อื่น</span></footer>
+  </main>;
+}
+
+
 const mimeFor = (file) => file.type || ({mp3:'audio/mpeg',mp4:'video/mp4',m4a:'audio/mp4',wav:'audio/wav',flac:'audio/flac',ogg:'audio/ogg',webm:'video/webm'}[file.name.split('.').pop().toLowerCase()] || 'application/octet-stream');
 
 const fmt = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(1)} MB`;
 const id = () => globalThis.crypto?.randomUUID?.() || String(Date.now() + Math.random());
 
 function App() {
+  const [session,setSession] = useState(() => { try { return JSON.parse(localStorage.getItem('aws-transcribe.session') || 'null'); } catch { return null; } });
   const [jobs, setJobs] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('aws-transcribe.jobs') || '[]');
@@ -24,6 +111,18 @@ function App() {
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState('เลือกไฟล์เสียงหรือวิดีโอเพื่อเริ่มต้น');
   const inputRef = useRef(null);
+
+  async function authorizedHeaders(extra = {}) {
+    if (!session?.idToken) throw new Error('กรุณาเข้าสู่ระบบก่อน');
+    let active = session;
+    if (tokenExpired(active.idToken)) {
+      active = await refreshSession(active);
+      setSession(active);
+      localStorage.setItem('aws-transcribe.session',JSON.stringify(active));
+    }
+    return {...extra,Authorization:'Bearer '+active.idToken};
+  }
+  function logout() { localStorage.removeItem('aws-transcribe.session'); setSession(null); }
 
   useEffect(() => {
     try {
@@ -58,7 +157,7 @@ function App() {
       setJobs(old => [...old, { id:localId, file, name:file.name, size:fmt(file.size), status:'กำลังอัปโหลด', progress:10 }]);
       try {
         const uploadResponse = await fetch(`${API_BASE}/uploads`, {
-          method:'POST', headers:{'content-type':'application/json'},
+          method:'POST', headers:await authorizedHeaders({'content-type':'application/json'}),
           body:JSON.stringify({ fileName:file.name, contentType, size:file.size })
         });
         if (!uploadResponse.ok) throw new Error((await uploadResponse.json()).error || 'ขอ URL อัปโหลดไม่สำเร็จ');
@@ -67,7 +166,7 @@ function App() {
         const putResponse = await fetch(upload.uploadUrl, { method:'PUT', headers:{'content-type':contentType}, body:file });
         if (!putResponse.ok) throw new Error('อัปโหลดไป S3 ไม่สำเร็จ');
         const jobResponse = await fetch(`${API_BASE}/jobs`, {
-          method:'POST', headers:{'content-type':'application/json'},
+          method:'POST', headers:await authorizedHeaders({'content-type':'application/json'}),
           body:JSON.stringify({ jobId:upload.jobId, key:upload.key, fileName:file.name, sourceLanguage:language, translateToThai:translate })
         });
         if (!jobResponse.ok) throw new Error((await jobResponse.json()).error || 'ส่งงานเข้าคิวไม่สำเร็จ');
@@ -86,7 +185,7 @@ function App() {
       const pending = jobs.filter(job => job.serverJobId && !['เสร็จแล้ว','ล้มเหลว'].includes(job.status));
       for (const job of pending) {
         try {
-          const response = await fetch(API_BASE + '/jobs/' + job.serverJobId);
+          const response = await fetch(API_BASE + '/jobs/' + job.serverJobId,{headers:await authorizedHeaders()});
           if (!response.ok) continue;
           const remote = await response.json();
           const status = remote.status === 'COMPLETED' ? 'เสร็จแล้ว' : remote.status === 'FAILED' ? 'ล้มเหลว' : remote.status === 'TRANSCRIBING' ? 'กำลังถอดเสียง' : remote.status === 'QUEUED' ? 'รอคิว AWS' : remote.status;
@@ -116,10 +215,12 @@ function App() {
     setJobs(old => old.filter(j => j.status !== 'เสร็จแล้ว'));
   }
 
+  if (!session?.idToken) return <AuthPanel onAuthenticated={setSession}/>;
+
   return <main className="shell">
     <header className="topbar">
       <a className="brand" href="#"><span className="brand-icon"><AudioLines size={21}/></span><span>AWS <b>Transcribe</b><small>STUDIO</small></span></a>
-      <button className="icon-button" aria-label="ไปยังการตั้งค่างาน" onClick={() => document.getElementById("job-settings")?.scrollIntoView({behavior:"smooth",block:"center"})}><Settings2 size={19}/></button>
+      <div className="top-actions"><button className="icon-button" aria-label="ไปยังการตั้งค่างาน" onClick={() => document.getElementById("job-settings")?.scrollIntoView({behavior:"smooth",block:"center"})}><Settings2 size={19}/></button><button className="text-button logout-button" onClick={logout}>ออกจากระบบ</button></div>
     </header>
 
     <section className="hero">
