@@ -4,6 +4,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { getAuthenticatedUserId } from './auth.mjs';
 
 const region = process.env.AWS_REGION;
 const s3 = new S3Client({ region });
@@ -23,6 +24,9 @@ const response = (statusCode, body) => ({
 
 export const handler = async (event) => {
   if (event.requestContext?.http?.method === 'OPTIONS') return response(204, {});
+  const ownerId = getAuthenticatedUserId(event);
+  if (!ownerId) return response(401, { error:'Authentication required.' });
+
   try {
     const method = event.requestContext?.http?.method || event.httpMethod;
     const path = event.rawPath || event.path || '';
@@ -44,7 +48,7 @@ export const handler = async (event) => {
       const { jobId, key, fileName, sourceLanguage = 'auto', translateToThai = true } = body;
       if (!jobId || !key || !fileName || !sourceLanguages.has(sourceLanguage) || !key.startsWith(`incoming/${jobId}/`)) return response(400, { error: 'Invalid uploaded file reference.' });
       const now = new Date().toISOString();
-      const item = { jobId, key, fileName, sourceLanguage, translateToThai: Boolean(translateToThai), status:'QUEUED', createdAt:now, updatedAt:now };
+      const item = { jobId, ownerId, key, fileName, sourceLanguage, translateToThai: Boolean(translateToThai), status:'QUEUED', createdAt:now, updatedAt:now };
       await ddb.send(new PutCommand({ TableName: table, Item:item, ConditionExpression:'attribute_not_exists(jobId)' }));
       await sqs.send(new SendMessageCommand({ QueueUrl:queueUrl, MessageBody:JSON.stringify({ jobId }) }));
       return response(202, item);
@@ -53,7 +57,7 @@ export const handler = async (event) => {
     const jobMatch = path.match(/\/jobs\/([a-f0-9-]+)$/i);
     if (method === 'GET' && jobMatch) {
       const result = await ddb.send(new GetCommand({ TableName:table, Key:{ jobId:jobMatch[1] } }));
-      if (!result.Item) return response(404,{error:'Job not found'});
+      if (!result.Item || result.Item.ownerId !== ownerId) return response(404,{error:'Job not found'});
       const item = result.Item;
       const downloads = {};
       if (item.originalSrtKey) downloads.original = await getSignedUrl(s3, new GetObjectCommand({ Bucket:bucket, Key:item.originalSrtKey }), { expiresIn:900 });
