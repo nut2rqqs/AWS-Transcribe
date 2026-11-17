@@ -9,6 +9,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
 const transcribe = new TranscribeClient({ region });
 const table = process.env.JOBS_TABLE;
 const bucket = process.env.UPLOAD_BUCKET;
+const transcribeLanguageCodes = { ja:'ja-JP', zh:'zh-CN', en:'en-US', ko:'ko-KR', th:'th-TH' };
 
 export const handler = async (event) => {
   const batchItemFailures = [];
@@ -26,7 +27,7 @@ export const handler = async (event) => {
         TranscriptionJobName:transcribeJobName,
         Media:{ MediaFileUri:`s3://${bucket}/${job.key}` },
         IdentifyLanguage: job.sourceLanguage === 'auto',
-        ...(job.sourceLanguage !== 'auto' ? { LanguageCode:job.sourceLanguage } : {}),
+        ...(job.sourceLanguage !== 'auto' ? { LanguageCode:transcribeLanguageCodes[job.sourceLanguage] || job.sourceLanguage } : {}),
         OutputBucketName:bucket,
         OutputKey:`transcripts/${jobId}/original`,
         Subtitles:{ Formats:['srt'], OutputStartIndex:1 }
