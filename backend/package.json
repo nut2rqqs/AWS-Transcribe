@@ -2,11 +2,16 @@
   "name": "aws-transcribe-backend",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/api.mjs && node --check src/worker.mjs && node --check src/translate.mjs && node --check src/subtitles.mjs"
+  },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.750.0",
     "@aws-sdk/client-s3": "^3.750.0",
     "@aws-sdk/client-sqs": "^3.750.0",
     "@aws-sdk/client-transcribe": "^3.750.0",
+    "@aws-sdk/client-translate": "^3.750.0",
     "@aws-sdk/lib-dynamodb": "^3.750.0",
     "@aws-sdk/s3-request-presigner": "^3.750.0"
   }
