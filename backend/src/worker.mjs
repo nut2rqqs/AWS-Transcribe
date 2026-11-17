@@ -1,6 +1,6 @@
 import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { TranscribeClient, StartTranscriptionJobCommand } from '@aws-sdk/client-transcribe';
 
 const region = process.env.AWS_REGION;
@@ -11,22 +11,24 @@ const table = process.env.JOBS_TABLE;
 const bucket = process.env.UPLOAD_BUCKET;
 
 export const handler = async (event) => {
+  const batchItemFailures = [];
   for (const record of event.Records || []) {
-    const { jobId } = JSON.parse(record.body);
-    const result = await ddb.send(new (await import('@aws-sdk/lib-dynamodb')).GetCommand({ TableName:table, Key:{jobId} }));
-    const job = result.Item;
-    if (!job) continue;
+    let jobId = 'unknown';
     try {
+      ({ jobId } = JSON.parse(record.body));
+      const result = await ddb.send(new GetCommand({ TableName:table, Key:{jobId} }));
+      const job = result.Item;
+      if (!job || job.status !== 'QUEUED') continue;
+
       await s3.send(new HeadObjectCommand({ Bucket:bucket, Key:job.key }));
-      const mediaUri = `s3://${bucket}/${job.key}`;
       const transcribeJobName = `aws-ts-${jobId}`.slice(0,200);
       await transcribe.send(new StartTranscriptionJobCommand({
         TranscriptionJobName:transcribeJobName,
-        Media:{ MediaFileUri:mediaUri },
+        Media:{ MediaFileUri:`s3://${bucket}/${job.key}` },
         IdentifyLanguage: job.sourceLanguage === 'auto',
         ...(job.sourceLanguage !== 'auto' ? { LanguageCode:job.sourceLanguage } : {}),
         OutputBucketName:bucket,
-        OutputKey:`transcripts/${jobId}/original.json`,
+        OutputKey:`transcripts/${jobId}/original`,
         Subtitles:{ Formats:['srt'], OutputStartIndex:1 }
       }));
       await ddb.send(new UpdateCommand({
@@ -37,13 +39,18 @@ export const handler = async (event) => {
       }));
     } catch (error) {
       console.error('Transcribe start failed', {jobId,error});
-      await ddb.send(new UpdateCommand({
-        TableName:table, Key:{jobId},
-        UpdateExpression:'SET #status = :status, errorMessage = :message, updatedAt = :now',
-        ExpressionAttributeNames:{'#status':'status'},
-        ExpressionAttributeValues:{':status':'FAILED',':message':'Unable to start transcription. Check file format, region support, and IAM permissions.',':now':new Date().toISOString()}
-      }));
-      throw error;
+      try {
+        await ddb.send(new UpdateCommand({
+          TableName:table, Key:{jobId},
+          UpdateExpression:'SET #status = :status, errorMessage = :message, updatedAt = :now',
+          ExpressionAttributeNames:{'#status':'status'},
+          ExpressionAttributeValues:{':status':'FAILED',':message':'Unable to start transcription. Check file format, region support, and IAM permissions.',':now':new Date().toISOString()}
+        }));
+      } catch (updateError) {
+        console.error('Unable to persist failed job state', {jobId,updateError});
+      }
+      batchItemFailures.push({ itemIdentifier:record.messageId });
     }
   }
+  return { batchItemFailures };
 };
