@@ -148,7 +148,7 @@ function App() {
           const response = await fetch(API_BASE + '/jobs/' + job.serverJobId,{headers:await authorizedHeaders()});
           if (!response.ok) continue;
           const remote = await response.json();
-          const status = remote.status === 'COMPLETED' ? 'เสร็จแล้ว' : remote.status === 'FAILED' ? 'ล้มเหลว' : remote.status === 'TRANSCRIBING' ? 'กำลังถอดเสียง' : remote.status === 'QUEUED' ? 'รอคิว AWS' : remote.status;
+          const status = ({ QUEUED:'รอคิว AWS', STARTING:'กำลังเตรียมงาน', TRANSCRIBING:'กำลังถอดเสียง', TRANSCRIBE_COMPLETED:'กำลังจัดเตรียมซับ', COMPLETING:'กำลังแปลและสร้างซับ', COMPLETED:'เสร็จแล้ว', FAILED:'ล้มเหลว' })[remote.status] || remote.status;
           setJobs(old => old.map(item => item.id === job.id ? {...item, status, downloads:remote.downloads || {}, error:remote.errorMessage || item.error} : item));
         } catch (error) { console.warn('Job status refresh failed', error); }
       }
