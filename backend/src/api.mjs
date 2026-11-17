@@ -22,6 +22,8 @@ const response = (statusCode, body) => ({
   body: JSON.stringify(body)
 });
 
+const isConditionalFailure = error => error?.name === 'ConditionalCheckFailedException';
+
 export const handler = async (event) => {
   if (event.requestContext?.http?.method === 'OPTIONS') return response(204, {});
   const ownerId = getAuthenticatedUserId(event);
@@ -46,11 +48,43 @@ export const handler = async (event) => {
 
     if (method === 'POST' && path.endsWith('/jobs')) {
       const { jobId, key, fileName, sourceLanguage = 'auto', translateToThai = true } = body;
-      if (!jobId || !key || !fileName || !sourceLanguages.has(sourceLanguage) || !key.startsWith(`incoming/${jobId}/`)) return response(400, { error: 'Invalid uploaded file reference.' });
+      if (!jobId || !key || !fileName || !sourceLanguages.has(sourceLanguage) || !key.startsWith(`incoming/${jobId}/`)) {
+        return response(400, { error: 'Invalid uploaded file reference.' });
+      }
+
       const now = new Date().toISOString();
-      const item = { jobId, ownerId, key, fileName, sourceLanguage, translateToThai: Boolean(translateToThai), status:'QUEUED', createdAt:now, updatedAt:now };
-      await ddb.send(new PutCommand({ TableName: table, Item:item, ConditionExpression:'attribute_not_exists(jobId)' }));
-      await sqs.send(new SendMessageCommand({ QueueUrl:queueUrl, MessageBody:JSON.stringify({ jobId }) }));
+      const requested = {
+        jobId, ownerId, key, fileName, sourceLanguage,
+        translateToThai: Boolean(translateToThai),
+        status: 'QUEUED', createdAt: now, updatedAt: now
+      };
+      let item = requested;
+      try {
+        await ddb.send(new PutCommand({
+          TableName: table,
+          Item: requested,
+          ConditionExpression: 'attribute_not_exists(jobId)'
+        }));
+      } catch (error) {
+        if (!isConditionalFailure(error)) throw error;
+        const existing = await ddb.send(new GetCommand({ TableName: table, Key: { jobId } }));
+        item = existing.Item;
+        if (!item || item.ownerId !== ownerId) return response(404, { error: 'Job not found.' });
+        if (item.key !== key || item.fileName !== fileName) return response(409, { error: 'Job ID is already associated with a different upload.' });
+        // Re-sending is safe: the worker claims jobs conditionally and uses a
+        // deterministic Transcribe job name to recover duplicate deliveries.
+        if (item.status !== 'QUEUED' && item.status !== 'STARTING') return response(202, item);
+      }
+
+      try {
+        await sqs.send(new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify({ jobId })
+        }));
+      } catch (error) {
+        console.error('Unable to enqueue job; client may safely retry with the same jobId.', { jobId, error });
+        return response(503, { error: 'Job is saved but could not be queued yet. Retry this request with the same jobId.' });
+      }
       return response(202, item);
     }
 
