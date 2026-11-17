@@ -6,19 +6,14 @@ Parameters:
     Type: String
     Default: '*'
     Description: Set to the deployed CloudFront website origin before production.
-Globals:
-  Function:
-    Runtime: nodejs20.x
-    Architectures: [arm64]
-    Timeout: 30
-    MemorySize: 512
-    Environment:
-      Variables:
-        JOBS_TABLE: !Ref JobsTable
-        UPLOAD_BUCKET: !Ref UploadBucket
-        JOBS_QUEUE_URL: !Ref JobsQueue
-        ALLOWED_ORIGIN: !Ref AllowedOrigin
 Resources:
+  WebApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowHeaders: ['content-type','authorization']
+        AllowMethods: [GET,POST,OPTIONS]
   UploadBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -49,23 +44,27 @@ Resources:
           KeyType: HASH
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-  JobsQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      VisibilityTimeout: 180
-      MessageRetentionPeriod: 345600
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt JobsDeadLetterQueue.Arn
-        maxReceiveCount: 3
   JobsDeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
       MessageRetentionPeriod: 1209600
+  JobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 240
+      MessageRetentionPeriod: 345600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt JobsDeadLetterQueue.Arn
+        maxReceiveCount: 3
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: .
       Handler: src/api.handler
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Timeout: 30
+      MemorySize: 512
       Environment:
         Variables:
           JOBS_TABLE: !Ref JobsTable
@@ -80,17 +79,23 @@ Resources:
         Api:
           Type: HttpApi
           Properties:
-            CorsConfiguration:
-              AllowOrigins: [!Ref AllowedOrigin]
-              AllowHeaders: ['content-type','authorization']
-              AllowMethods: [GET,POST,OPTIONS]
+            ApiId: !Ref WebApi
+            Path: /{proxy+}
+            Method: ANY
   TranscribeWorker:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: .
       Handler: src/worker.handler
+      Runtime: nodejs20.x
+      Architectures: [arm64]
       ReservedConcurrentExecutions: 1
       Timeout: 180
+      MemorySize: 512
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          UPLOAD_BUCKET: !Ref UploadBucket
       Policies:
         - S3ReadPolicy: { BucketName: !Ref UploadBucket }
         - S3WritePolicy: { BucketName: !Ref UploadBucket }
@@ -109,7 +114,7 @@ Resources:
 Outputs:
   ApiBaseUrl:
     Description: HTTP API base URL
-    Value: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+    Value: !Sub 'https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com'
   UploadBucketName:
     Value: !Ref UploadBucket
   JobsTableName:
