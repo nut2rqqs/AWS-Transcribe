@@ -45,14 +45,74 @@ export function formatSrt(cues) {
   ).join('\n\n') + (cues.length ? '\n' : '');
 }
 
+export async function translateCueTexts(texts, translateText, maxBytes = 4500) {
+  const output = new Array(texts.length);
+  const groups = [];
+  let group = [];
+  let bytes = 0;
+
+  for (let index = 0; index < texts.length; index += 1) {
+    const text = String(texts[index] ?? '');
+    if (!text) {
+      output[index] = text;
+      continue;
+    }
+    const marker = `⟦CUE${String(index).padStart(6, '0')}⟧`;
+    const entryBytes = Buffer.byteLength(marker, 'utf8') + Buffer.byteLength(text, 'utf8') + 2;
+    if (group.length && bytes + entryBytes > maxBytes) {
+      groups.push(group);
+      group = [];
+      bytes = 0;
+    }
+    group.push({ index, marker, text });
+    bytes += entryBytes;
+  }
+  if (group.length) groups.push(group);
+
+  for (const entries of groups) {
+    if (entries.length === 1) {
+      output[entries[0].index] = await translateText(entries[0].text);
+      continue;
+    }
+
+    const combined = entries.map(entry => `${entry.marker}\n${entry.text}`).join('\n\n');
+    let translated;
+    try {
+      translated = await translateText(combined);
+    } catch (error) {
+      throw error;
+    }
+
+    const positions = entries.map(entry => translated.indexOf(entry.marker));
+    const valid = positions.every((position, index) =>
+      position >= 0 &&
+      translated.indexOf(entries[index].marker, position + entries[index].marker.length) === -1 &&
+      (index === 0 || position > positions[index - 1])
+    );
+
+    if (valid) {
+      for (let index = 0; index < entries.length; index += 1) {
+        const start = positions[index] + entries[index].marker.length;
+        const end = index + 1 < entries.length ? positions[index + 1] : translated.length;
+        output[entries[index].index] = translated.slice(start, end).replace(/^\s*\n?/, '').replace(/\s*$/, '');
+      }
+    } else {
+      // If Translate alters or drops a marker, preserve cue alignment by
+      // translating the original cues separately rather than guessing splits.
+      for (const entry of entries) {
+        output[entry.index] = await translateText(entry.text);
+      }
+    }
+  }
+  return output;
+}
+
 export async function translateSrt(srt, translateText) {
   const cues = parseSrt(srt);
-  const translated = [];
-  for (const cue of cues) {
-    // Pass the complete subtitle text through unchanged. No profanity masking,
-    // euphemization, adult-dialogue filtering, or asterisk replacement here.
-    const text = cue.text ? await translateText(cue.text) : cue.text;
-    translated.push({ ...cue, text: text || '[ฟังไม่ชัด]' });
-  }
-  return formatSrt(translated);
+  const texts = await translateCueTexts(cues.map(cue => cue.text), translateText);
+  return formatSrt(cues.map((cue, index) => ({
+    ...cue,
+    text: texts[index] || '[ฟังไม่ชัด]'
+  })));
 }
+ 
