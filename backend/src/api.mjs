@@ -12,7 +12,7 @@ const sqs = new SQSClient({ region });
 const table = process.env.JOBS_TABLE;
 const bucket = process.env.UPLOAD_BUCKET;
 const queueUrl = process.env.JOBS_QUEUE_URL;
-const allowed = new Set(['audio/mpeg','audio/mp4','video/mp4','audio/wav','audio/x-wav','audio/flac','audio/ogg']);
+const allowed = new Set(['audio/mpeg','audio/mp4','video/mp4','audio/wav','audio/x-wav','audio/flac','audio/ogg','video/webm','audio/webm']);
 const sourceLanguages = new Set(['auto','ja','zh','en','ko','th']);
 
 const response = (statusCode, body) => ({
