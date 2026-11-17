@@ -14,5 +14,6 @@
     "@aws-sdk/client-translate": "^3.750.0",
     "@aws-sdk/lib-dynamodb": "^3.750.0",
     "@aws-sdk/s3-request-presigner": "^3.750.0"
-  }
+  },
+  "version": "1.0.0"
 }
