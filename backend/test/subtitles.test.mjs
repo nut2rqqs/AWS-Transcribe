@@ -2,12 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSrt, formatSrt, translateSrt } from '../src/subtitles.mjs';
 
-test('parses and formats SRT while preserving timestamps', () => {
+test('parses and formats multiple SRT cues while preserving timestamps', () => {
   const input = '1\n00:00:01,000 --> 00:00:02,500\nHello\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld';
   const cues = parseSrt(input);
   assert.equal(cues.length, 2);
   assert.equal(cues[0].start, '00:00:01,000');
   assert.match(formatSrt(cues), /00:00:03,000 --> 00:00:04,000/);
+});
+
+test('supports BOM, Windows line endings, multiline cues and timing settings', () => {
+  const input = '\uFEFF1\r\n00:00:01,000 --> 00:00:02,500 align:start\r\nFirst line\r\nSecond line';
+  const [cue] = parseSrt(input);
+  assert.equal(cue.text, 'First line\nSecond line');
+  assert.equal(cue.settings, ' align:start');
+  assert.match(formatSrt([cue]), /align:start\nFirst line\nSecond line/);
+});
+
+test('returns an empty list for an empty subtitle file', () => {
+  assert.deepEqual(parseSrt('\uFEFF  \r\n'), []);
+  assert.equal(formatSrt([]), '');
+});
+
+test('rejects malformed blocks instead of silently dropping subtitle dialogue', () => {
+  assert.throws(() => parseSrt('1\nThis block has no timestamp\n\n2\n00:00:02,000 --> 00:00:01,000\nReversed'), /missing timestamp|reversed timestamps/);
+  assert.throws(() => parseSrt('1\n00:99:01,000 --> 00:99:02,000\nInvalid time'), /invalid or reversed timestamps/);
 });
 
 test('passes adult/profane source text unchanged to the translation provider', async () => {
@@ -17,6 +35,17 @@ test('passes adult/profane source text unchanged to the translation provider', a
   assert.equal(received, 'Explicit adult dialogue and profanity');
   assert.match(output, /คำแปลภาษาไทย/);
   assert.match(output, /00:00:01,000 --> 00:00:02,500/);
+});
+
+test('translates each cue independently and preserves cue timing', async () => {
+  const calls = [];
+  const output = await translateSrt('1\n00:00:00,000 --> 00:00:01,000\nHello\n\n2\n00:00:01,000 --> 00:00:02,000\nWorld', async text => {
+    calls.push(text);
+    return `TH:${text}`;
+  });
+  assert.deepEqual(calls, ['Hello', 'World']);
+  assert.match(output, /1\n00:00:00,000 --> 00:00:01,000\nTH:Hello/);
+  assert.match(output, /2\n00:00:01,000 --> 00:00:02,000\nTH:World/);
 });
 
 test('keeps uncertain speech explicit instead of inventing dialogue', async () => {
