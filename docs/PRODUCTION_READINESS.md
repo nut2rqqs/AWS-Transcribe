@@ -1,72 +1,81 @@
 # Production Readiness Plan
 
-This checklist is the release gate for AWS Transcribe Studio. A green frontend build alone is not a production approval.
+This checklist distinguishes source-code implementation from behavior verified in a deployed AWS environment. A green CI build is not production approval.
 
-## Release gates
+## Implemented in the current PR (source inspection only)
+
+- [x] Cognito sign-up, email confirmation, sign-in, refresh and logout flow in the web client.
+- [x] API Gateway JWT authorizer and owner-scoped job reads.
+- [x] Private S3 bucket with public-access blocks, encryption and lifecycle retention.
+- [x] Short-lived presigned upload and download URLs.
+- [x] Multi-file upload UI and queued job processing.
+- [x] SQS worker with conditional start lease and deterministic Transcribe job-name recovery.
+- [x] EventBridge completion handler with conditional completion lease and retry behavior.
+- [x] Original SRT and Thai SRT exports, plus browser-side ZIP packaging.
+- [x] Context-batched subtitle translation with cue-marker validation and per-cue fallback.
+- [x] SQS dead-letter queue, API throttling and basic upload metadata/size validation.
+- [x] CI checks for web build, backend syntax/unit tests, SAM validation and SAM build.
+- [x] No application-level profanity masking or blanket filtering of lawful adult dialogue.
+
+These are code-presence checks, not proof that AWS runtime behavior works.
+
+## Remaining release gates
 
 ### 1. Identity, privacy and security
-- [ ] Add an authentication and authorization layer before any public deployment.
-- [ ] Ensure every job read, download and mutation is scoped to its owner.
-- [ ] Keep S3 objects private; use short-lived presigned URLs only.
-- [ ] Validate upload object ownership, content type, file size and actual media format.
-- [ ] Add API throttling, request validation and abuse protection.
+- [ ] Deploy Cognito and verify sign-up, email confirmation, sign-in, refresh and logout with real tokens.
+- [ ] Verify cross-user job access is denied for every API route.
+- [ ] Verify upload URLs cannot be used to overwrite or attach another user's objects.
+- [ ] Verify actual uploaded media format and content type, not only browser-supplied metadata.
 - [ ] Review IAM policies for least privilege.
-- [ ] Define privacy, retention, deletion and incident-response behavior.
+- [ ] Define user-facing privacy, retention, deletion and incident-response behavior.
 
 ### 2. Upload and job lifecycle
-- [ ] Support multi-file selection and a durable server-side job history.
-- [ ] Verify uploaded objects before enqueueing work.
-- [ ] Make job creation and queue publication recoverable if either step fails.
-- [ ] Make worker and completion handling idempotent.
-- [ ] Define retry limits, visibility timeout, dead-letter handling and manual retry.
+- [ ] Add automated integration tests for queue enqueue failure and polling-based recovery.
+- [ ] Test concurrent pollers and verify the cooldown prevents duplicate SQS floods.
+- [ ] Test worker lease contention, lease expiry and duplicate SQS delivery.
+- [ ] Test Transcribe ConflictException recovery against a real or faithful AWS test double.
+- [ ] Test SQS retry exhaustion and DLQ behavior.
 - [ ] Add cancellation and safe deletion of uploaded media and outputs.
-- [ ] Persist progress and clear user-facing error states.
+- [ ] Verify job history restoration after refresh and on a second device; current history behavior must be confirmed in the deployed app.
 
 ### 3. Transcription and subtitle quality
-- [ ] Verify every selected language and Auto Detect in the deployment Region.
-- [ ] Verify MP3 and MP4 media extraction, including video containers with supported audio tracks.
-- [ ] Verify SRT output exists for all supported language paths.
-- [ ] Preserve cue order, timestamps, multiline text and formatting.
-- [ ] Never silently discard malformed or unparsed subtitle cues.
-- [ ] Translate with context-aware batching where practical; preserve timestamps exactly.
-- [ ] Keep unclear speech explicitly marked rather than hallucinating dialogue.
-- [ ] Do not add app-level profanity masking, euphemization or blanket filtering of lawful adult dialogue. Provider terms and applicable law still apply.
+- [ ] Verify Auto Detect and every advertised language in the selected AWS Region.
+- [ ] Verify MP3 and MP4 media processing, including MP4 files with supported audio tracks.
+- [ ] Verify Transcribe returns usable SRT subtitle URIs for each supported language path.
+- [ ] Verify Thai translation quality on representative short and long recordings.
+- [ ] Verify cue order, timestamps, multiline text and formatting remain intact.
+- [ ] Verify unclear speech is marked rather than hallucinated.
+- [ ] Verify lawful adult dialogue is not altered by application-level filtering; provider terms and applicable law still apply.
 
 ### 4. Web experience
-- [ ] Finish responsive mobile-first upload, queue, settings and result views.
-- [ ] Restore job history after refresh and on a second device after authentication is implemented.
-- [ ] Show upload and processing progress accurately.
-- [ ] Provide original SRT, Thai SRT and ZIP downloads with useful filenames.
-- [ ] Handle expired download links by requesting fresh links.
-- [ ] Provide accessible controls, keyboard support and clear empty/loading/error states.
-- [ ] Test on Android Chrome and Firefox plus desktop browsers.
+- [ ] Test multi-file upload and sequential processing on Android Chrome and Firefox.
+- [ ] Verify upload progress, processing state and clear error recovery.
+- [ ] Verify expired download URLs are refreshed automatically or on user action.
+- [ ] Verify Original SRT, Thai SRT and ZIP filenames and ZIP extraction on Android.
+- [ ] Verify responsive layout, accessibility and empty/loading/error states.
 
 ### 5. AWS operations and cost controls
-- [ ] Deploy only after reviewing account ID, Region, quotas and estimated service costs.
-- [ ] Use supported Lambda runtime (currently Node.js 24) and validate/build with AWS SAM.
-- [ ] Set exact production website origin; do not use wildcard CORS in production.
-- [ ] Keep S3 lifecycle retention explicit and documented.
-- [ ] Add CloudWatch structured logs, metrics, alarms and DLQ monitoring.
-- [ ] Add budget alerts and per-job/file-size guardrails.
-- [ ] Test cleanup and recovery paths; verify no orphaned media or Transcribe jobs remain.
+- [ ] Confirm AWS account, selected Region, service quotas and supported Transcribe language identification.
+- [ ] Confirm exact website origin; do not deploy with wildcard CORS.
+- [ ] Add AWS Budgets alerts and verify cost guardrails before accepting real uploads.
+- [ ] Review CloudWatch logs, metrics, alarms and DLQ monitoring.
+- [ ] Verify S3 lifecycle retention and cleanup of orphaned media and Transcribe jobs.
+- [ ] Estimate per-minute Transcribe and Translate costs and test file-size/job limits.
 
 ### 6. Verification and release
-- [ ] Web production build passes.
-- [ ] Backend syntax checks and unit tests pass.
-- [ ] SAM validate --lint passes.
-- [ ] SAM build passes.
-- [ ] Integration test passes in the selected AWS Region.
-- [ ] Real MP3 and MP4 test files complete end-to-end.
-- [ ] Original and Thai SRT timestamps and text are verified.
-- [ ] ZIP downloads and opens correctly on Android.
-- [ ] Duplicate events, failed translation, expired URLs and queue retries are tested.
-- [ ] Cost and retention behavior are verified.
+- [x] Web production build passes on the current PR head.
+- [x] Backend syntax checks and unit tests pass on the current PR head.
+- [x] SAM validate --lint passes on the current PR head.
+- [x] SAM build passes on the current PR head.
+- [ ] Clean CI passes on the next PR head after any further changes.
+- [ ] Deploy to a controlled AWS test environment.
+- [ ] Complete real MP3 and MP4 end-to-end tests through Cognito, S3, SQS, Transcribe, EventBridge, Translate and signed downloads.
+- [ ] Verify original and Thai SRT content and timestamps.
+- [ ] Verify ZIP download and extraction on Android.
+- [ ] Verify duplicate events, failed translation, expired URLs, queue retries and DLQ behavior.
+- [ ] Verify actual AWS costs and retention behavior.
 - [ ] Only then mark the PR ready and approve production deployment.
 
-## Current known blockers
+## Current release status
 
-- API endpoints currently have no user authentication/authorization. API throttling is only a secondary safeguard and does not replace identity controls.
-- Browser job history is local to the current browser; cross-device history requires authenticated ownership and server-side listing.
-- End-to-end AWS integration tests have not yet been performed.
-- Current translation is cue-by-cue; context-aware translation and language-quality evaluation remain to be implemented.
-- No production infrastructure has been deployed by the code changes in this PR.
+The current PR has passing source-level CI, but no AWS infrastructure has been deployed by these code changes. Real Cognito authentication, AWS service integration, media processing, subtitle delivery and cost behavior remain unverified. Keep this PR in Draft until all release gates above are complete.
