@@ -114,7 +114,7 @@ export const handler = async (event) => {
               ':now': nowSeconds,
               ':retryAfter': nowSeconds + 60
             },
-            ReturnValues: 'ALL_NEW'
+            ReturnValues: 'NONE'
           }));
           item = claim.Attributes || item;
           try {
