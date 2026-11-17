@@ -173,6 +173,30 @@ function App() {
     } catch (error) { setNotice('สร้าง ZIP ไม่สำเร็จ: ' + (error.message || error)); }
   }
 
+  async function downloadSrt(job, language) {
+    try {
+      // Refresh the short-lived S3 URL at the moment of download.
+      const statusResponse = await fetch(API_BASE + '/jobs/' + job.serverJobId, { headers: await authorizedHeaders() });
+      if (!statusResponse.ok) throw new Error('เรียกข้อมูลไฟล์ล่าสุดไม่สำเร็จ');
+      const latest = await statusResponse.json();
+      const url = latest.downloads?.[language];
+      if (!url) throw new Error(language === 'thai' ? 'ยังไม่มีไฟล์ SRT ภาษาไทย' : 'ยังไม่มีไฟล์ SRT ต้นฉบับ');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('ดาวน์โหลด SRT ไม่สำเร็จ');
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const baseName = job.name.replace(/\\.[^.]+$/, '');
+      anchor.href = objectUrl;
+      anchor.download = baseName + (language === 'thai' ? '-th.srt' : '-original.srt');
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setJobs(old => old.map(item => item.id === job.id ? {...item, downloads:latest.downloads || {}} : item));
+    } catch (error) {
+      setNotice('ดาวน์โหลด SRT ไม่สำเร็จ: ' + (error.message || error));
+    }
+  }
+
   function removeJob(jobId) {
     setJobs(old => old.filter(j => j.id !== jobId));
   }
@@ -220,7 +244,7 @@ function App() {
     <section className="queue-section">
       <div className="section-heading"><div><span className="eyebrow">PROCESSING QUEUE</span><h2>คิวประมวลผล <span className="count">{counts.all}</span></h2></div><button className="text-button" onClick={clearDone} disabled={!counts.done}>ล้างงานที่เสร็จ</button></div>
       {jobs.length === 0 ? <div className="empty-state"><div className="empty-icon"><ListMusic size={23}/></div><b>ยังไม่มีไฟล์ในคิว</b><span>ไฟล์ที่คุณเลือกจะแสดงที่นี่</span></div> :
-        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.error ? ` · ${job.error}` : ''}{job.status==='เสร็จแล้ว'&&<div className="job-downloads"><button className="text-button" onClick={()=>downloadZip(job)}><Download size={13}/> ดาวน์โหลด SRT + ZIP</button></div>}{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
+        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.error ? ` · ${job.error}` : ''}{job.status==='เสร็จแล้ว'&&<div className="job-downloads"><button className="text-button" onClick={()=>downloadSrt(job,'original')}><Download size={13}/> SRT ต้นฉบับ</button><button className="text-button" onClick={()=>downloadSrt(job,'thai')}><Download size={13}/> SRT ภาษาไทย</button><button className="text-button" onClick={()=>downloadZip(job)}><Download size={13}/> ZIP รวมทั้งสองไฟล์</button></div>}{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
     </section>
 
     <footer><div className="footer-mark"><AudioLines size={17}/> AWS Transcribe Studio</div><span>Web workspace · Mobile ready</span><p>{notice}</p></footer>
