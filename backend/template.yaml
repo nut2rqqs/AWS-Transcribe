@@ -131,6 +131,7 @@ Resources:
           JOBS_QUEUE_URL: !Ref JobsQueue
           ALLOWED_ORIGIN: !Ref AllowedOrigin
       Policies:
+        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
         - S3WritePolicy: { BucketName: !Ref UploadBucket }
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
         - SQSSendMessagePolicy: { QueueName: !GetAtt JobsQueue.QueueName }
@@ -161,7 +162,7 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
         - Statement:
             - Effect: Allow
-              Action: [transcribe:StartTranscriptionJob]
+              Action: [transcribe:StartTranscriptionJob, transcribe:GetTranscriptionJob]
               Resource: '*'
       Events:
         Queue:
