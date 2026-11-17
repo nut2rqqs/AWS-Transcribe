@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { AudioLines, Check, ChevronDown, Clock3, CloudUpload, Download, FileAudio, FileVideo, Languages, ListMusic, LoaderCircle, Play, Plus, Settings2, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react';
 import './styles.css';
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\\/$/, '');
+const mimeFor = (file) => file.type || ({mp3:'audio/mpeg',mp4:'video/mp4',m4a:'audio/mp4',wav:'audio/wav',flac:'audio/flac',ogg:'audio/ogg',webm:'video/webm'}[file.name.split('.').pop().toLowerCase()] || 'application/octet-stream');
+
 const fmt = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(1)} MB`;
 const id = () => globalThis.crypto?.randomUUID?.() || String(Date.now() + Math.random());
 
@@ -19,16 +22,45 @@ function App() {
     done: jobs.filter(j => j.status === 'เสร็จแล้ว').length
   }), [jobs]);
 
-  function addFiles(fileList) {
-    const accepted = Array.from(fileList || []).filter(f => /\.(mp3|mp4|m4a|wav|flac|ogg|webm)$/i.test(f.name));
+  async function addFiles(fileList) {
+    const accepted = Array.from(fileList || []).filter(f => /\\.(mp3|mp4|m4a|wav|flac|ogg|webm)$/i.test(f.name));
     if (!accepted.length) {
       setNotice('รองรับ MP3, MP4, M4A, WAV, FLAC, OGG และ WEBM');
       return;
     }
-    setJobs(old => [...old, ...accepted.map(file => ({
-      id: id(), file, name: file.name, size: fmt(file.size), status: 'รอคิว', progress: 0
-    }))]);
-    setNotice(`เพิ่ม ${accepted.length} ไฟล์เข้าคิวแล้ว`);
+    if (!API_BASE) {
+      setJobs(old => [...old, ...accepted.map(file => ({
+        id: id(), file, name: file.name, size: fmt(file.size), status: 'รอเชื่อม AWS API', progress: 0
+      }))]);
+      setNotice('เพิ่มไฟล์ในหน้าจอแล้ว แต่ยังไม่ได้เชื่อม AWS API — ยังไม่มีการอัปโหลดหรือถอดเสียงจริง');
+      return;
+    }
+    for (const file of accepted) {
+      const localId = id();
+      const contentType = mimeFor(file);
+      setJobs(old => [...old, { id:localId, file, name:file.name, size:fmt(file.size), status:'กำลังอัปโหลด', progress:10 }]);
+      try {
+        const uploadResponse = await fetch(`${API_BASE}/uploads`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body:JSON.stringify({ fileName:file.name, contentType, size:file.size })
+        });
+        if (!uploadResponse.ok) throw new Error((await uploadResponse.json()).error || 'ขอ URL อัปโหลดไม่สำเร็จ');
+        const upload = await uploadResponse.json();
+        setJobs(old => old.map(j => j.id === localId ? {...j,progress:35,status:'กำลังส่งไฟล์ไป S3'} : j));
+        const putResponse = await fetch(upload.uploadUrl, { method:'PUT', headers:{'content-type':contentType}, body:file });
+        if (!putResponse.ok) throw new Error('อัปโหลดไป S3 ไม่สำเร็จ');
+        const jobResponse = await fetch(`${API_BASE}/jobs`, {
+          method:'POST', headers:{'content-type':'application/json'},
+          body:JSON.stringify({ jobId:upload.jobId, key:upload.key, fileName:file.name, sourceLanguage:language, translateToThai:translate })
+        });
+        if (!jobResponse.ok) throw new Error((await jobResponse.json()).error || 'ส่งงานเข้าคิวไม่สำเร็จ');
+        setJobs(old => old.map(j => j.id === localId ? {...j,progress:100,status:'รอคิว AWS',serverJobId:upload.jobId} : j));
+        setNotice(`อัปโหลด ${file.name} สำเร็จและส่งเข้าคิว AWS แล้ว`);
+      } catch (error) {
+        setJobs(old => old.map(j => j.id === localId ? {...j,status:'อัปโหลดไม่สำเร็จ',error:String(error.message || error)} : j));
+        setNotice(`ไม่สามารถส่ง ${file.name} ได้: ${error.message || error}`);
+      }
+    }
   }
 
   function removeJob(jobId) {
