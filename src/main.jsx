@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import JSZip from 'jszip';
 import { createRoot } from 'react-dom/client';
 import { AudioLines, Check, ChevronDown, Clock3, CloudUpload, Download, FileAudio, FileVideo, Languages, ListMusic, LoaderCircle, Play, Plus, Settings2, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react';
 import './styles.css';
@@ -63,6 +64,34 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (!API_BASE) return;
+    const timer = setInterval(async () => {
+      const pending = jobs.filter(job => job.serverJobId && !['เสร็จแล้ว','ล้มเหลว'].includes(job.status));
+      for (const job of pending) {
+        try {
+          const response = await fetch(API_BASE + '/jobs/' + job.serverJobId);
+          if (!response.ok) continue;
+          const remote = await response.json();
+          const status = remote.status === 'COMPLETED' ? 'เสร็จแล้ว' : remote.status === 'FAILED' ? 'ล้มเหลว' : remote.status === 'TRANSCRIBING' ? 'กำลังถอดเสียง' : remote.status === 'QUEUED' ? 'รอคิว AWS' : remote.status;
+          setJobs(old => old.map(item => item.id === job.id ? {...item, status, downloads:remote.downloads || {}, error:remote.errorMessage || item.error} : item));
+        } catch (error) { console.warn('Job status refresh failed', error); }
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [jobs]);
+
+  async function downloadZip(job) {
+    try {
+      const zip = new JSZip();
+      const entries = [['original.srt', job.downloads?.original], ['thai.srt', job.downloads?.thai]].filter(([,url]) => Boolean(url));
+      if (!entries.length) throw new Error('ยังไม่มีไฟล์ดาวน์โหลด');
+      for (const [name,url] of entries) { const response = await fetch(url); if (!response.ok) throw new Error('ดาวน์โหลด ' + name + ' ไม่สำเร็จ'); zip.file(name, await response.text()); }
+      const blob = await zip.generateAsync({type:'blob'});
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = job.name.replace(/\\.[^.]+$/, '') + '-subtitles.zip'; anchor.click(); URL.revokeObjectURL(url);
+    } catch (error) { setNotice('สร้าง ZIP ไม่สำเร็จ: ' + (error.message || error)); }
+  }
   function removeJob(jobId) {
     setJobs(old => old.filter(j => j.id !== jobId));
   }
@@ -108,7 +137,7 @@ function App() {
     <section className="queue-section">
       <div className="section-heading"><div><span className="eyebrow">PROCESSING QUEUE</span><h2>คิวประมวลผล <span className="count">{counts.all}</span></h2></div><button className="text-button" onClick={clearDone} disabled={!counts.done}>ล้างงานที่เสร็จ</button></div>
       {jobs.length === 0 ? <div className="empty-state"><div className="empty-icon"><ListMusic size={23}/></div><b>ยังไม่มีไฟล์ในคิว</b><span>ไฟล์ที่คุณเลือกจะแสดงที่นี่</span></div> :
-        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
+        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.error ? ` · ${job.error}` : ''}{job.status==='เสร็จแล้ว'&&<div className="job-downloads"><button className="text-button" onClick={()=>downloadZip(job)}><Download size={13}/> ดาวน์โหลด SRT + ZIP</button>{job.downloads?.original&&<a href={job.downloads.original} target="_blank" rel="noreferrer">Original SRT</a>}{job.downloads?.thai&&<a href={job.downloads.thai} target="_blank" rel="noreferrer">Thai SRT</a>}</div>}{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
     </section>
 
     <footer><div className="footer-mark"><AudioLines size={17}/> AWS Transcribe Studio</div><span>Web workspace · Mobile ready</span><p>{notice}</p></footer>
