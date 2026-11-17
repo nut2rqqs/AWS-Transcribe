@@ -56,7 +56,7 @@ export const handler = async (event) => {
     const subtitleUris = transcription?.Subtitles?.SubtitleFileUris || [];
     const originalSrt = await readSubtitle(subtitleUris[0]);
     const sourceLanguage = transcription?.LanguageCode || job.sourceLanguage || 'auto';
-    const thaiSrt = sourceLanguage === 'th'
+    const thaiSrt = !job.translateToThai || sourceLanguage === 'th'
       ? originalSrt
       : await translateSubtitleFile(originalSrt, sourceLanguage);
 
