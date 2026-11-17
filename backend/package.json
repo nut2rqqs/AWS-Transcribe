@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/api.mjs && node --check src/worker.mjs && node --check src/translate.mjs && node --check src/subtitles.mjs"
+    "check": "node --check src/api.mjs && node --check src/auth.mjs && node --check src/worker.mjs && node --check src/translate.mjs && node --check src/subtitles.mjs && node --check src/completion.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.750.0",
@@ -14,5 +14,6 @@
     "@aws-sdk/client-translate": "^3.750.0",
     "@aws-sdk/lib-dynamodb": "^3.750.0",
     "@aws-sdk/s3-request-presigner": "^3.750.0"
-  }
+  },
+  "version": "1.0.0"
 }

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { getAuthenticatedUserId } from './auth.mjs';
 
 const region = process.env.AWS_REGION;
 const s3 = new S3Client({ region });
@@ -21,8 +22,13 @@ const response = (statusCode, body) => ({
   body: JSON.stringify(body)
 });
 
+const isConditionalFailure = error => error?.name === 'ConditionalCheckFailedException';
+
 export const handler = async (event) => {
   if (event.requestContext?.http?.method === 'OPTIONS') return response(204, {});
+  const ownerId = getAuthenticatedUserId(event);
+  if (!ownerId) return response(401, { error:'Authentication required.' });
+
   try {
     const method = event.requestContext?.http?.method || event.httpMethod;
     const path = event.rawPath || event.path || '';
@@ -42,18 +48,92 @@ export const handler = async (event) => {
 
     if (method === 'POST' && path.endsWith('/jobs')) {
       const { jobId, key, fileName, sourceLanguage = 'auto', translateToThai = true } = body;
-      if (!jobId || !key || !fileName || !sourceLanguages.has(sourceLanguage) || !key.startsWith(`incoming/${jobId}/`)) return response(400, { error: 'Invalid uploaded file reference.' });
+      if (!jobId || !key || !fileName || !sourceLanguages.has(sourceLanguage) || !key.startsWith(`incoming/${jobId}/`)) {
+        return response(400, { error: 'Invalid uploaded file reference.' });
+      }
+
       const now = new Date().toISOString();
-      const item = { jobId, key, fileName, sourceLanguage, translateToThai: Boolean(translateToThai), status:'QUEUED', createdAt:now, updatedAt:now };
-      await ddb.send(new PutCommand({ TableName: table, Item:item, ConditionExpression:'attribute_not_exists(jobId)' }));
-      await sqs.send(new SendMessageCommand({ QueueUrl:queueUrl, MessageBody:JSON.stringify({ jobId }) }));
+      const requested = {
+        jobId, ownerId, key, fileName, sourceLanguage,
+        translateToThai: Boolean(translateToThai),
+        status: 'QUEUED', createdAt: now, updatedAt: now
+      };
+      let item = requested;
+      try {
+        await ddb.send(new PutCommand({
+          TableName: table,
+          Item: requested,
+          ConditionExpression: 'attribute_not_exists(jobId)'
+        }));
+      } catch (error) {
+        if (!isConditionalFailure(error)) throw error;
+        const existing = await ddb.send(new GetCommand({ TableName: table, Key: { jobId } }));
+        item = existing.Item;
+        if (!item || item.ownerId !== ownerId) return response(404, { error: 'Job not found.' });
+        if (item.key !== key || item.fileName !== fileName) return response(409, { error: 'Job ID is already associated with a different upload.' });
+        // Re-sending is safe: the worker claims jobs conditionally and uses a
+        // deterministic Transcribe job name to recover duplicate deliveries.
+        if (item.status !== 'QUEUED' && item.status !== 'STARTING') return response(202, item);
+      }
+
+      try {
+        await sqs.send(new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify({ jobId })
+        }));
+      } catch (error) {
+        console.error('Unable to enqueue job; client may safely retry with the same jobId.', { jobId, error });
+        return response(503, { error: 'Job is saved but could not be queued yet. Retry this request with the same jobId.' });
+      }
       return response(202, item);
     }
 
     const jobMatch = path.match(/\/jobs\/([a-f0-9-]+)$/i);
     if (method === 'GET' && jobMatch) {
       const result = await ddb.send(new GetCommand({ TableName:table, Key:{ jobId:jobMatch[1] } }));
-      return result.Item ? response(200,result.Item) : response(404,{error:'Job not found'});
+      if (!result.Item || result.Item.ownerId !== ownerId) return response(404,{error:'Job not found'});
+      let item = result.Item;
+
+      // A status poll can recover a QUEUED job if the original enqueue failed
+      // and the client could not retry POST /jobs. The conditional cooldown
+      // prevents concurrent pollers from flooding SQS; no scheduled AWS
+      // resource is required.
+      if (item.status === 'QUEUED') {
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const staleBefore = new Date((nowSeconds - 30) * 1000).toISOString();
+        try {
+          const claim = await ddb.send(new UpdateCommand({
+            TableName: table,
+            Key: { jobId: item.jobId },
+            UpdateExpression: 'SET queueRetryAfter = :retryAfter',
+            ConditionExpression: '#status = :queued AND updatedAt <= :staleBefore AND (attribute_not_exists(queueRetryAfter) OR queueRetryAfter <= :now)',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: {
+              ':queued': 'QUEUED',
+              ':staleBefore': staleBefore,
+              ':now': nowSeconds,
+              ':retryAfter': nowSeconds + 60
+            },
+            ReturnValues: 'NONE'
+          }));
+          item = claim.Attributes || item;
+          try {
+            await sqs.send(new SendMessageCommand({
+              QueueUrl: queueUrl,
+              MessageBody: JSON.stringify({ jobId: item.jobId })
+            }));
+          } catch (enqueueError) {
+            console.error('Queue recovery attempt failed; a later status poll may retry.', { jobId: item.jobId, enqueueError });
+          }
+        } catch (claimError) {
+          if (!isConditionalFailure(claimError)) throw claimError;
+        }
+      }
+
+      const downloads = {};
+      if (item.originalSrtKey) downloads.original = await getSignedUrl(s3, new GetObjectCommand({ Bucket:bucket, Key:item.originalSrtKey }), { expiresIn:900 });
+      if (item.thaiSrtKey) downloads.thai = await getSignedUrl(s3, new GetObjectCommand({ Bucket:bucket, Key:item.thaiSrtKey }), { expiresIn:900 });
+      return response(200,{...item,downloads});
     }
     return response(404,{error:'Route not found'});
   } catch (error) {

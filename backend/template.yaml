@@ -1,12 +1,46 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS Transcribe web backend foundation (private uploads, job API, serialized Transcribe queue).
+Description: AWS Transcribe web backend with authenticated queued transcription and Thai subtitle completion.
 Parameters:
   AllowedOrigin:
     Type: String
     Default: '*'
     Description: Set to the deployed CloudFront website origin before production.
 Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-users'
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
   WebApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -14,6 +48,17 @@ Resources:
         AllowOrigins: [!Ref AllowedOrigin]
         AllowHeaders: ['content-type','authorization']
         AllowMethods: [GET,POST,OPTIONS]
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience: [!Ref UserPoolClient]
+        DefaultAuthorizer: CognitoAuthorizer
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
   UploadBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -26,6 +71,20 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireUploadedMedia
+            Status: Enabled
+            Prefix: incoming/
+            ExpirationInDays: 7
+          - Id: ExpireTranscribeArtifacts
+            Status: Enabled
+            Prefix: transcripts/
+            ExpirationInDays: 7
+          - Id: ExpireSubtitleExports
+            Status: Enabled
+            Prefix: outputs/
+            ExpirationInDays: 30
       CorsConfiguration:
         CorsRules:
           - AllowedMethods: [PUT, GET, HEAD]
@@ -61,7 +120,7 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/api.handler
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Architectures: [arm64]
       Timeout: 30
       MemorySize: 512
@@ -72,6 +131,7 @@ Resources:
           JOBS_QUEUE_URL: !Ref JobsQueue
           ALLOWED_ORIGIN: !Ref AllowedOrigin
       Policies:
+        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
         - S3WritePolicy: { BucketName: !Ref UploadBucket }
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
         - SQSSendMessagePolicy: { QueueName: !GetAtt JobsQueue.QueueName }
@@ -87,7 +147,7 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/worker.handler
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Architectures: [arm64]
       ReservedConcurrentExecutions: 1
       Timeout: 180
@@ -111,10 +171,49 @@ Resources:
             Queue: !GetAtt JobsQueue.Arn
             BatchSize: 1
             FunctionResponseTypes: [ReportBatchItemFailures]
+  TranscribeCompletion:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/completion.handler
+      Runtime: nodejs24.x
+      Architectures: [arm64]
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          UPLOAD_BUCKET: !Ref UploadBucket
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
+        - S3WritePolicy: { BucketName: !Ref UploadBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
+        - Statement:
+            - Effect: Allow
+              Action: [transcribe:GetTranscriptionJob]
+              Resource: '*'
+            - Effect: Allow
+              Action: [translate:TranslateText]
+              Resource: '*'
+      Events:
+        TranscribeStateChange:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.transcribe]
+              detail-type: [Transcribe Job State Change]
+              detail:
+                TranscriptionJobStatus: [COMPLETED, FAILED]
 Outputs:
   ApiBaseUrl:
     Description: HTTP API base URL
     Value: !Sub 'https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com'
+  CognitoUserPoolId:
+    Value: !Ref UserPool
+  CognitoUserPoolClientId:
+    Value: !Ref UserPoolClient
+  CognitoIssuer:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
   UploadBucketName:
     Value: !Ref UploadBucket
   JobsTableName:
