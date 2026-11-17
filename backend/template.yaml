@@ -144,13 +144,6 @@ Resources:
               detail-type: [Transcribe Job State Change]
               detail:
                 TranscriptionJobStatus: [COMPLETED, FAILED]
-  CompletionInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !GetAtt TranscribeCompletion.Arn
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt TranscribeCompletionTranscribeStateChangeEvent.Arn
 Outputs:
   ApiBaseUrl:
     Description: HTTP API base URL
