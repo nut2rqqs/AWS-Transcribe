@@ -1,5 +1,5 @@
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
-import { translateSrt } from './subtitles.mjs';
+import { parseSrt, formatSrt, translateCueTexts } from './subtitles.mjs';
 
 const client = new TranslateClient({ region:process.env.AWS_REGION });
 const translateLanguageCodes = {
@@ -18,7 +18,8 @@ export function normalizeTranslateLanguageCode(sourceLanguage = 'auto') {
 
 export async function translateSubtitleFile(srt, sourceLanguage = 'auto') {
   const normalizedSource = normalizeTranslateLanguageCode(sourceLanguage);
-  return translateSrt(srt, async (text) => {
+  const cues = parseSrt(srt);
+  const translatedTexts = await translateCueTexts(cues.map(cue => cue.text), async (text) => {
     const result = await client.send(new TranslateTextCommand({
       Text:text,
       SourceLanguageCode:normalizedSource,
@@ -26,4 +27,8 @@ export async function translateSubtitleFile(srt, sourceLanguage = 'auto') {
     }));
     return result.TranslatedText || text;
   });
+  return formatSrt(cues.map((cue, index) => ({
+    ...cue,
+    text: translatedTexts[index] || '[ฟังไม่ชัด]'
+  })));
 }
