@@ -12,7 +12,8 @@ const sqs = new SQSClient({ region });
 const table = process.env.JOBS_TABLE;
 const bucket = process.env.UPLOAD_BUCKET;
 const queueUrl = process.env.JOBS_QUEUE_URL;
-const allowed = new Set(['audio/mpeg','audio/mp4','video/mp4','audio/wav','audio/x-wav','audio/flac','audio/ogg','audio/mp4']);
+const allowed = new Set(['audio/mpeg','audio/mp4','video/mp4','audio/wav','audio/x-wav','audio/flac','audio/ogg']);
+const sourceLanguages = new Set(['auto','ja','zh','en','ko','th']);
 
 const response = (statusCode, body) => ({
   statusCode,
@@ -41,7 +42,7 @@ export const handler = async (event) => {
 
     if (method === 'POST' && path.endsWith('/jobs')) {
       const { jobId, key, fileName, sourceLanguage = 'auto', translateToThai = true } = body;
-      if (!jobId || !key || !fileName || !key.startsWith(`incoming/${jobId}/`)) return response(400, { error: 'Invalid uploaded file reference.' });
+      if (!jobId || !key || !fileName || !sourceLanguages.has(sourceLanguage) || !key.startsWith(`incoming/${jobId}/`)) return response(400, { error: 'Invalid uploaded file reference.' });
       const now = new Date().toISOString();
       const item = { jobId, key, fileName, sourceLanguage, translateToThai: Boolean(translateToThai), status:'QUEUED', createdAt:now, updatedAt:now };
       await ddb.send(new PutCommand({ TableName: table, Item:item, ConditionExpression:'attribute_not_exists(jobId)' }));
