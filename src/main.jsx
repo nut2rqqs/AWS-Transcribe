@@ -11,12 +11,28 @@ const fmt = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} K
 const id = () => globalThis.crypto?.randomUUID?.() || String(Date.now() + Math.random());
 
 function App() {
-  const [jobs, setJobs] = useState([]);
+  const [jobs, setJobs] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('aws-transcribe.jobs') || '[]');
+      return Array.isArray(saved) ? saved.map(job => ({ ...job, file:null, downloads:{} })) : [];
+    } catch {
+      return [];
+    }
+  });
   const [language, setLanguage] = useState('auto');
   const [translate, setTranslate] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState('เลือกไฟล์เสียงหรือวิดีโอเพื่อเริ่มต้น');
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      const durableJobs = jobs.map(({ file, downloads, ...job }) => job);
+      localStorage.setItem('aws-transcribe.jobs', JSON.stringify(durableJobs));
+    } catch (error) {
+      console.warn('Unable to persist local job history', error);
+    }
+  }, [jobs]);
   const counts = useMemo(() => ({
     all: jobs.length,
     queued: jobs.filter(j => j.status === 'รอคิว').length,
@@ -89,7 +105,7 @@ function App() {
       for (const [name,url] of entries) { const response = await fetch(url); if (!response.ok) throw new Error('ดาวน์โหลด ' + name + ' ไม่สำเร็จ'); zip.file(name, await response.text()); }
       const blob = await zip.generateAsync({type:'blob'});
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = job.name.replace(/\\.[^.]+$/, '') + '-subtitles.zip'; anchor.click(); URL.revokeObjectURL(url);
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = job.name.replace(/\.[^.]+$/, '') + '-subtitles.zip'; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) { setNotice('สร้าง ZIP ไม่สำเร็จ: ' + (error.message || error)); }
   }
   function removeJob(jobId) {
@@ -103,7 +119,7 @@ function App() {
   return <main className="shell">
     <header className="topbar">
       <a className="brand" href="#"><span className="brand-icon"><AudioLines size={21}/></span><span>AWS <b>Transcribe</b><small>STUDIO</small></span></a>
-      <button className="icon-button" aria-label="ตั้งค่า"><Settings2 size={19}/></button>
+      <button className="icon-button" aria-label="ไปยังการตั้งค่างาน" onClick={() => document.getElementById("job-settings")?.scrollIntoView({behavior:"smooth",block:"center"})}><Settings2 size={19}/></button>
     </header>
 
     <section className="hero">
@@ -125,7 +141,7 @@ function App() {
       <div className="file-types"><span><FileAudio size={14}/> MP3 / WAV / M4A</span><span><FileVideo size={14}/> MP4 / WEBM</span></div>
     </section>
 
-    <section className="settings-card">
+    <section className="settings-card" id="job-settings">
       <div className="section-heading"><div><span className="eyebrow">JOB SETTINGS</span><h2>การตั้งค่างาน</h2></div><span className="settings-tag"><Settings2 size={14}/> ปรับได้</span></div>
       <div className="setting-row"><div><b>ภาษาต้นฉบับ</b><small>ตรวจจับภาษาอัตโนมัติหรือเลือกเอง</small></div>
         <div className="select-wrap"><select value={language} onChange={e=>setLanguage(e.target.value)}><option value="auto">Auto Detect</option><option value="ja">Japanese</option><option value="zh">Chinese</option><option value="en">English</option><option value="ko">Korean</option><option value="th">Thai</option></select><ChevronDown size={15}/></div>
