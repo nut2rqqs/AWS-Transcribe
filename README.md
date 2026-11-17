@@ -12,11 +12,26 @@ A mobile-first web application for uploading audio/video files, processing them 
 - Keep unclear audio marked as uncertain rather than inventing dialogue.
 - Download original transcript, original SRT, Thai SRT, and a ZIP package.
 - Keep AWS credentials on the server; never expose credentials in browser code.
+- Cognito sign-up, email confirmation, sign-in, token refresh, and owner-scoped job access.
+
+## Current implementation
+
+The web workspace now includes a Cognito account screen and sends the Cognito ID token as a Bearer token to the protected API. The browser calls Cognito directly for sign-up, confirmation, sign-in, and refresh; AWS service credentials remain server-side.
+
+Set these Vite environment variables for a deployed/test environment:
+
+- `VITE_API_BASE_URL`: API Gateway HTTP API base URL.
+- `VITE_COGNITO_REGION`: AWS Region containing the user pool.
+- `VITE_COGNITO_USER_POOL_ID`: Cognito User Pool ID.
+- `VITE_COGNITO_CLIENT_ID`: public app-client ID (no client secret).
+
+See `.env.example` for the local variable names. Do not commit real environment values or AWS credentials. The web app cannot complete sign-up/login until Cognito has been deployed and these public configuration values are supplied.
 
 ## Planned AWS architecture
 
 - Static web hosting: Amazon S3 + CloudFront.
 - API: Amazon API Gateway + AWS Lambda.
+- Authentication: Amazon Cognito User Pool + API Gateway JWT authorizer.
 - Upload and output storage: private Amazon S3 buckets with short-lived presigned URLs.
 - Queue: Amazon SQS (one worker at a time initially).
 - Speech recognition: Amazon Transcribe (batch jobs).
@@ -30,10 +45,11 @@ GitHub is for source control, development, and CI only. The production applicati
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
-The current first milestone is the responsive web foundation and documented AWS deployment contract. AWS resources are not created by this repository commit; deploy only after reviewing the account, region, IAM permissions, and estimated costs.
+The current milestone is source implementation and CI validation. AWS resources have not been deployed by these source changes. Do not deploy until account, Region, IAM permissions, CORS origin, service quotas, budget alerts, and end-to-end behavior have been reviewed.
 
 ## Important content-handling requirement
 
