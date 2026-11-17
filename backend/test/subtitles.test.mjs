@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSrt, formatSrt, translateSrt } from '../src/subtitles.mjs';
+import { parseSrt, formatSrt, translateSrt, translateCueTexts } from '../src/subtitles.mjs';
 
 test('parses and formats multiple SRT cues while preserving timestamps', () => {
   const input = '1\n00:00:01,000 --> 00:00:02,500\nHello\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld';
@@ -38,15 +38,27 @@ test('passes adult/profane source text unchanged to the translation provider', a
   assert.match(output, /00:00:01,000 --> 00:00:02,500/);
 });
 
-test('translates each cue independently and preserves cue timing', async () => {
+test('batches adjacent cues for context while preserving cue order and timestamps', async () => {
   const calls = [];
   const output = await translateSrt('1\n00:00:00,000 --> 00:00:01,000\nHello\n\n2\n00:00:01,000 --> 00:00:02,000\nWorld', async text => {
     calls.push(text);
+    return text.replace('Hello', 'สวัสดี').replace('World', 'โลก');
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /Hello[\s\S]*World/);
+  assert.match(output, /1\n00:00:00,000 --> 00:00:01,000\nสวัสดี/);
+  assert.match(output, /2\n00:00:01,000 --> 00:00:02,000\nโลก/);
+});
+
+test('falls back to individual cues if the translation provider changes alignment markers', async () => {
+  const calls = [];
+  const result = await translateCueTexts(['First', 'Second'], async text => {
+    calls.push(text);
+    if (text.includes('⟦CUE')) return 'markers removed';
     return `TH:${text}`;
   });
-  assert.deepEqual(calls, ['Hello', 'World']);
-  assert.match(output, /1\n00:00:00,000 --> 00:00:01,000\nTH:Hello/);
-  assert.match(output, /2\n00:00:01,000 --> 00:00:02,000\nTH:World/);
+  assert.deepEqual(result, ['TH:First', 'TH:Second']);
+  assert.equal(calls.length, 3);
 });
 
 test('keeps uncertain speech explicit instead of inventing dialogue', async () => {
