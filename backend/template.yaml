@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS Transcribe web backend foundation (private uploads, job API, serialized Transcribe queue).
+Description: AWS Transcribe web backend with queued transcription and Thai subtitle completion.
 Parameters:
   AllowedOrigin:
     Type: String
@@ -102,7 +102,7 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
         - Statement:
             - Effect: Allow
-              Action: [transcribe:StartTranscriptionJob, transcribe:GetTranscriptionJob]
+              Action: [transcribe:StartTranscriptionJob]
               Resource: '*'
       Events:
         Queue:
@@ -111,6 +111,46 @@ Resources:
             Queue: !GetAtt JobsQueue.Arn
             BatchSize: 1
             FunctionResponseTypes: [ReportBatchItemFailures]
+  TranscribeCompletion:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/completion.handler
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          JOBS_TABLE: !Ref JobsTable
+          UPLOAD_BUCKET: !Ref UploadBucket
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
+        - S3WritePolicy: { BucketName: !Ref UploadBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
+        - Statement:
+            - Effect: Allow
+              Action: [transcribe:GetTranscriptionJob]
+              Resource: '*'
+            - Effect: Allow
+              Action: [translate:TranslateText]
+              Resource: '*'
+      Events:
+        TranscribeStateChange:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: [aws.transcribe]
+              detail-type: [Transcribe Job State Change]
+              detail:
+                TranscriptionJobStatus: [COMPLETED, FAILED]
+  CompletionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TranscribeCompletion.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TranscribeCompletionTranscribeStateChangeEvent.Arn
 Outputs:
   ApiBaseUrl:
     Description: HTTP API base URL
