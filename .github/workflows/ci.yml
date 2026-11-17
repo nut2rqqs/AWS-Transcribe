@@ -62,3 +62,5 @@ jobs:
         uses: aws-actions/setup-sam@v2
       - name: Validate infrastructure template
         run: sam validate --lint --template-file backend/template.yaml
+      - name: Build SAM application
+        run: sam build --template-file backend/template.yaml
