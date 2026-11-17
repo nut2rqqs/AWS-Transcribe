@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AudioLines, Check, ChevronDown, Clock3, CloudUpload, Download, FileAudio, FileVideo, Languages, ListMusic, LoaderCircle, Play, Plus, Settings2, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react';
 import './styles.css';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\\/$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const mimeFor = (file) => file.type || ({mp3:'audio/mpeg',mp4:'video/mp4',m4a:'audio/mp4',wav:'audio/wav',flac:'audio/flac',ogg:'audio/ogg',webm:'video/webm'}[file.name.split('.').pop().toLowerCase()] || 'application/octet-stream');
 
 const fmt = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(1)} MB`;
@@ -23,7 +23,7 @@ function App() {
   }), [jobs]);
 
   async function addFiles(fileList) {
-    const accepted = Array.from(fileList || []).filter(f => /\\.(mp3|mp4|m4a|wav|flac|ogg|webm)$/i.test(f.name));
+    const accepted = Array.from(fileList || []).filter(f => /\.(mp3|mp4|m4a|wav|flac|ogg|webm)$/i.test(f.name));
     if (!accepted.length) {
       setNotice('รองรับ MP3, MP4, M4A, WAV, FLAC, OGG และ WEBM');
       return;
