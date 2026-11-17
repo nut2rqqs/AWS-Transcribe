@@ -65,3 +65,9 @@ test('keeps uncertain speech explicit instead of inventing dialogue', async () =
   const output = await translateSrt('1\n00:00:00,000 --> 00:00:01,000\n[unintelligible]', async () => '[ฟังไม่ชัด]');
   assert.match(output, /\[ฟังไม่ชัด\]/);
 });
+
+
+test('normalizes empty or non-string translation responses safely', async () => {
+  const result = await translateCueTexts(['Only cue'], async () => undefined);
+  assert.deepEqual(result, ['']);
+});
