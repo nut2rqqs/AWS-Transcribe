@@ -71,17 +71,12 @@ export async function translateCueTexts(texts, translateText, maxBytes = 4500) {
 
   for (const entries of groups) {
     if (entries.length === 1) {
-      output[entries[0].index] = await translateText(entries[0].text);
+      output[entries[0].index] = String((await translateText(entries[0].text)) ?? '');
       continue;
     }
 
     const combined = entries.map(entry => `${entry.marker}\n${entry.text}`).join('\n\n');
-    let translated;
-    try {
-      translated = await translateText(combined);
-    } catch (error) {
-      throw error;
-    }
+    const translated = String((await translateText(combined)) ?? '');
 
     const positions = entries.map(entry => translated.indexOf(entry.marker));
     const valid = positions.every((position, index) =>
@@ -100,7 +95,7 @@ export async function translateCueTexts(texts, translateText, maxBytes = 4500) {
       // If Translate alters or drops a marker, preserve cue alignment by
       // translating the original cues separately rather than guessing splits.
       for (const entry of entries) {
-        output[entry.index] = await translateText(entry.text);
+        output[entry.index] = String((await translateText(entry.text)) ?? '');
       }
     }
   }
