@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/api.mjs && node --check src/worker.mjs && node --check src/translate.mjs && node --check src/subtitles.mjs"
+    "check": "node --check src/api.mjs && node --check src/worker.mjs && node --check src/translate.mjs && node --check src/subtitles.mjs && node --check src/completion.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.750.0",
