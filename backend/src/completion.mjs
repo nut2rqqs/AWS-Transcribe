@@ -2,7 +2,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { TranscribeClient, GetTranscriptionJobCommand } from '@aws-sdk/client-transcribe';
-import { translateSubtitleFile } from './translate.mjs';
+import { translateSubtitleFile, normalizeTranslateLanguageCode } from './translate.mjs';
 
 const region = process.env.AWS_REGION;
 const s3 = new S3Client({ region });
@@ -98,7 +98,7 @@ export const handler = async (event) => {
     const subtitleUris = transcription?.Subtitles?.SubtitleFileUris || [];
     const originalSrt = await readSubtitle(subtitleUris[0]);
     const sourceLanguage = transcription?.LanguageCode || job.sourceLanguage || 'auto';
-    const thaiSrt = !job.translateToThai || sourceLanguage === 'th'
+    const thaiSrt = !job.translateToThai || normalizeTranslateLanguageCode(sourceLanguage) === 'th'
       ? originalSrt
       : await translateSubtitleFile(originalSrt, sourceLanguage);
 
