@@ -114,7 +114,7 @@ function App() {
     for (const file of accepted) {
       const localId = id();
       const contentType = mimeFor(file);
-      setJobs(old => [...old, { id:localId, file, name:file.name, size:fmt(file.size), status:'กำลังอัปโหลด', progress:10 }]);
+      setJobs(old => [...old, { id:localId, file, name:file.name, size:fmt(file.size), status:'กำลังอัปโหลด', progress:10, translateToThai:translate }]);
       try {
         const uploadResponse = await fetch(`${API_BASE}/uploads`, {
           method:'POST', headers:await authorizedHeaders({'content-type':'application/json'}),
@@ -244,7 +244,7 @@ function App() {
     <section className="queue-section">
       <div className="section-heading"><div><span className="eyebrow">PROCESSING QUEUE</span><h2>คิวประมวลผล <span className="count">{counts.all}</span></h2></div><button className="text-button" onClick={clearDone} disabled={!counts.done}>ล้างงานที่เสร็จ</button></div>
       {jobs.length === 0 ? <div className="empty-state"><div className="empty-icon"><ListMusic size={23}/></div><b>ยังไม่มีไฟล์ในคิว</b><span>ไฟล์ที่คุณเลือกจะแสดงที่นี่</span></div> :
-        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.error ? ` · ${job.error}` : ''}{job.status==='เสร็จแล้ว'&&<div className="job-downloads"><button className="text-button" onClick={()=>downloadSrt(job,'original')}><Download size={13}/> SRT ต้นฉบับ</button><button className="text-button" onClick={()=>downloadSrt(job,'thai')}><Download size={13}/> SRT ภาษาไทย</button><button className="text-button" onClick={()=>downloadZip(job)}><Download size={13}/> ZIP รวมทั้งสองไฟล์</button></div>}{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
+        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.error ? ` · ${job.error}` : ''}{job.status==='เสร็จแล้ว'&&<div className="job-downloads"><button className="text-button" onClick={()=>downloadSrt(job,'original')}><Download size={13}/> SRT ต้นฉบับ</button>{job.translateToThai!==false&&<button className="text-button" onClick={()=>downloadSrt(job,'thai')}><Download size={13}/> SRT ภาษาไทย</button>}<button className="text-button" onClick={()=>downloadZip(job)}><Download size={13}/> {job.translateToThai===false?'ZIP SRT ต้นฉบับ':'ZIP รวม SRT'}</button></div>}{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
     </section>
 
     <footer><div className="footer-mark"><AudioLines size={17}/> AWS Transcribe Studio</div><span>Web workspace · Mobile ready</span><p>{notice}</p></footer>
