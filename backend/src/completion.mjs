@@ -23,9 +23,10 @@ async function claimCompletion(jobId) {
       TableName: table,
       Key: { jobId },
       UpdateExpression: 'SET #status = :processing, completionLeaseUntil = :lease, updatedAt = :updated',
-      ConditionExpression: '#status = :transcribing OR #status = :transcribeCompleted OR (#status = :processing AND (attribute_not_exists(completionLeaseUntil) OR completionLeaseUntil < :now))',
+      ConditionExpression: '#status = :starting OR #status = :transcribing OR #status = :transcribeCompleted OR (#status = :processing AND (attribute_not_exists(completionLeaseUntil) OR completionLeaseUntil < :now))',
       ExpressionAttributeNames: { '#status': 'status' },
       ExpressionAttributeValues: {
+        ':starting': 'STARTING',
         ':transcribing': 'TRANSCRIBING',
         ':transcribeCompleted': 'TRANSCRIBE_COMPLETED',
         ':processing': 'COMPLETING',
