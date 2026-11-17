@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 jobs:
-  build:
+  web:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,7 +17,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install dependencies
+      - name: Install web dependencies
         run: npm install
       - name: Build web app
         run: npm run build
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install backend dependencies
+        run: npm install
+      - name: Check backend syntax
+        run: npm run check
+      - name: Test SRT and translation behavior
+        run: npm test
