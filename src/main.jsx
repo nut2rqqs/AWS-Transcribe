@@ -168,7 +168,7 @@ function App() {
       for (const [name,url] of entries) { const response = await fetch(url); if (!response.ok) throw new Error('ดาวน์โหลด ' + name + ' ไม่สำเร็จ'); zip.file(name, await response.text()); }
       const blob = await zip.generateAsync({type:'blob'});
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = job.name.replace(/\\.[^.]+$/, '') + '-subtitles.zip'; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = job.name.replace(/\.[^.]+$/, '') + '-subtitles.zip'; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setJobs(old => old.map(item => item.id === job.id ? {...item, downloads:latest.downloads || {}} : item));
     } catch (error) { setNotice('สร้าง ZIP ไม่สำเร็จ: ' + (error.message || error)); }
   }
@@ -186,7 +186,7 @@ function App() {
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
-      const baseName = job.name.replace(/\\.[^.]+$/, '');
+      const baseName = job.name.replace(/\.[^.]+$/, '');
       anchor.href = objectUrl;
       anchor.download = baseName + (language === 'thai' ? '-th.srt' : '-original.srt');
       anchor.click();
