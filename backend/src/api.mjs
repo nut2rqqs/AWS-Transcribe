@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -53,7 +53,12 @@ export const handler = async (event) => {
     const jobMatch = path.match(/\/jobs\/([a-f0-9-]+)$/i);
     if (method === 'GET' && jobMatch) {
       const result = await ddb.send(new GetCommand({ TableName:table, Key:{ jobId:jobMatch[1] } }));
-      return result.Item ? response(200,result.Item) : response(404,{error:'Job not found'});
+      if (!result.Item) return response(404,{error:'Job not found'});
+      const item = result.Item;
+      const downloads = {};
+      if (item.originalSrtKey) downloads.original = await getSignedUrl(s3, new GetObjectCommand({ Bucket:bucket, Key:item.originalSrtKey }), { expiresIn:900 });
+      if (item.thaiSrtKey) downloads.thai = await getSignedUrl(s3, new GetObjectCommand({ Bucket:bucket, Key:item.thaiSrtKey }), { expiresIn:900 });
+      return response(200,{...item,downloads});
     }
     return response(404,{error:'Route not found'});
   } catch (error) {
