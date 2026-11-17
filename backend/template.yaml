@@ -51,7 +51,7 @@ Resources:
   JobsQueue:
     Type: AWS::SQS::Queue
     Properties:
-      VisibilityTimeout: 240
+      VisibilityTimeout: 1080
       MessageRetentionPeriod: 345600
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt JobsDeadLetterQueue.Arn
