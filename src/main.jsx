@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AudioLines, Check, ChevronDown, Clock3, CloudUpload, Download, FileAudio, FileVideo, Languages, ListMusic, LoaderCircle, Play, Plus, Settings2, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react';
 import './styles.css';
@@ -63,6 +63,36 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    const pending = jobs.filter(job => job.serverJobId && !['COMPLETED','FAILED'].includes(job.serverStatus));
+    if (!pending.length || !API_BASE) return undefined;
+    let cancelled = false;
+    const poll = async () => {
+      await Promise.all(pending.map(async job => {
+        try {
+          const response = await fetch(`${API_BASE}/jobs/${job.serverJobId}`);
+          if (!response.ok) return;
+          const serverJob = await response.json();
+          if (cancelled) return;
+          const labels = { QUEUED:'รอคิว AWS', TRANSCRIBING:'กำลังถอดเสียง', PROCESSING:'กำลังเตรียมคำบรรยาย', COMPLETED:'เสร็จแล้ว', FAILED:'เกิดข้อผิดพลาด' };
+          setJobs(old => old.map(item => item.id === job.id ? {
+            ...item,
+            status:labels[serverJob.status] || item.status,
+            serverStatus:serverJob.status,
+            error:serverJob.errorMessage || item.error,
+            originalDownloadUrl:serverJob.originalDownloadUrl,
+            thaiDownloadUrl:serverJob.thaiDownloadUrl
+          } : item));
+        } catch (error) {
+          console.warn('Job status check failed', error);
+        }
+      }));
+    };
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [jobs, API_BASE]);
+
   function removeJob(jobId) {
     setJobs(old => old.filter(j => j.id !== jobId));
   }
@@ -108,7 +138,7 @@ function App() {
     <section className="queue-section">
       <div className="section-heading"><div><span className="eyebrow">PROCESSING QUEUE</span><h2>คิวประมวลผล <span className="count">{counts.all}</span></h2></div><button className="text-button" onClick={clearDone} disabled={!counts.done}>ล้างงานที่เสร็จ</button></div>
       {jobs.length === 0 ? <div className="empty-state"><div className="empty-icon"><ListMusic size={23}/></div><b>ยังไม่มีไฟล์ในคิว</b><span>ไฟล์ที่คุณเลือกจะแสดงที่นี่</span></div> :
-        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
+        <div className="job-list">{jobs.map(job=><article className="job" key={job.id}><div className="job-file-icon">{/\.(mp4|webm)$/i.test(job.name)?<FileVideo size={19}/>:<FileAudio size={19}/>}</div><div className="job-info"><b title={job.name}>{job.name}</b><small>{job.size} · {job.status}</small>{job.error&&<small role="alert">{job.error}</small>}{job.originalDownloadUrl&&<div className="job-downloads"><a href={job.originalDownloadUrl} target="_blank" rel="noreferrer" download>ดาวน์โหลด SRT ต้นฉบับ</a>{job.thaiDownloadUrl&&<a href={job.thaiDownloadUrl} target="_blank" rel="noreferrer" download>ดาวน์โหลด SRT ภาษาไทย</a>}</div>}{job.status==='กำลังประมวลผล'&&<div className="progress"><span style={{width:`${job.progress}%`}}/></div>}</div><button className="icon-button subtle" onClick={()=>removeJob(job.id)} aria-label="ลบไฟล์"><Trash2 size={16}/></button></article>)}</div>}
     </section>
 
     <footer><div className="footer-mark"><AudioLines size={17}/> AWS Transcribe Studio</div><span>Web workspace · Mobile ready</span><p>{notice}</p></footer>
