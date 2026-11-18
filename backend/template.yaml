@@ -7,6 +7,43 @@ Parameters:
     Default: '*'
     Description: Set to the deployed CloudFront website origin before production.
 Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-users'
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub '${AWS::StackName}-web'
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
   WebApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -14,6 +51,15 @@ Resources:
         AllowOrigins: [!Ref AllowedOrigin]
         AllowHeaders: ['content-type','authorization']
         AllowMethods: [GET,POST,OPTIONS]
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
+              audience:
+                - !Ref UserPoolClient
   UploadBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -120,6 +166,14 @@ Resources:
             BatchSize: 1
             FunctionResponseTypes: [ReportBatchItemFailures]
 Outputs:
+  CognitoUserPoolId:
+    Description: Cognito user pool ID for frontend authentication
+    Value: !Ref UserPool
+  CognitoUserPoolClientId:
+    Description: Cognito app client ID for frontend authentication
+    Value: !Ref UserPoolClient
+  CognitoIssuer:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}'
   ApiBaseUrl:
     Description: HTTP API base URL
     Value: !Sub 'https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com'
