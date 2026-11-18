@@ -73,8 +73,16 @@ Resources:
           ALLOWED_ORIGIN: !Ref AllowedOrigin
       Policies:
         - S3WritePolicy: { BucketName: !Ref UploadBucket }
+        - S3ReadPolicy: { BucketName: !Ref UploadBucket }
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
         - SQSSendMessagePolicy: { QueueName: !GetAtt JobsQueue.QueueName }
+        - Statement:
+            - Effect: Allow
+              Action: [transcribe:GetTranscriptionJob]
+              Resource: '*'
+            - Effect: Allow
+              Action: [translate:TranslateText]
+              Resource: '*'
       Events:
         Api:
           Type: HttpApi
@@ -102,7 +110,7 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref JobsTable }
         - Statement:
             - Effect: Allow
-              Action: [transcribe:StartTranscriptionJob, transcribe:GetTranscriptionJob]
+              Action: [transcribe:StartTranscriptionJob]
               Resource: '*'
       Events:
         Queue:
