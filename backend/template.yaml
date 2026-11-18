@@ -209,7 +209,6 @@ Resources:
       Handler: src/worker.handler
       Runtime: nodejs20.x
       Architectures: [arm64]
-      ReservedConcurrentExecutions: 1
       Timeout: 180
       MemorySize: 512
       Environment:
