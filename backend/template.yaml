@@ -173,7 +173,7 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/api.handler
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Architectures: [arm64]
       Timeout: 30
       MemorySize: 512
@@ -207,7 +207,7 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/worker.handler
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Architectures: [arm64]
       Timeout: 180
       MemorySize: 512
