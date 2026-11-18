@@ -38,3 +38,25 @@ The current first milestone is the responsive web foundation and documented AWS 
 ## Important content-handling requirement
 
 The app must not implement its own adult-content censor, profanity replacement, or blanket rejection of lawful 18+ dialogue. Translation providers may have their own service terms and limitations; test real, lawful adult-dialogue samples before claiming full compatibility. Never use this service to process illegal sexual content or sexual content involving minors.
+
+
+## Cognito authentication and deployment configuration
+
+The API is protected by an Amazon Cognito JWT authorizer. Public self-registration is disabled; create user accounts from the Cognito console as an administrator.
+
+After reviewing the AWS resources and estimated charges, deploy the backend from the `backend/` directory with AWS SAM. The stack outputs include:
+
+- `ApiBaseUrl`
+- `CognitoUserPoolId`
+- `CognitoUserPoolClientId`
+- `UploadBucketName`
+
+Build the web app with these environment variables set to the matching stack outputs:
+
+- `VITE_API_BASE_URL` = `ApiBaseUrl`
+- `VITE_COGNITO_USER_POOL_ID` = `CognitoUserPoolId`
+- `VITE_COGNITO_CLIENT_ID` = `CognitoUserPoolClientId`
+
+Create an administrator-managed user in the Cognito user pool and deliver the temporary password securely. On first sign-in, the app prompts the user to set a new password. Never put AWS access keys or secret keys in Vite environment variables or browser code.
+
+Set the SAM parameter `AllowedOrigin` to the exact HTTPS origin of the deployed website before production. Do not leave it as `*` for production. The Cognito pool and app client are billable/subject to AWS pricing and account quotas; review the account's region and costs before deployment.
