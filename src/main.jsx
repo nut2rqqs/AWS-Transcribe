@@ -63,6 +63,8 @@ function App() {
     }
   }
 
+  const pollKey = jobs.filter(job => job.serverJobId && !['COMPLETED','FAILED'].includes(job.serverStatus)).map(job => job.serverJobId).join(',');
+
   useEffect(() => {
     const pending = jobs.filter(job => job.serverJobId && !['COMPLETED','FAILED'].includes(job.serverStatus));
     if (!pending.length || !API_BASE) return undefined;
@@ -91,7 +93,7 @@ function App() {
     poll();
     const timer = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [jobs, API_BASE]);
+  }, [pollKey]);
 
   function removeJob(jobId) {
     setJobs(old => old.filter(j => j.id !== jobId));
