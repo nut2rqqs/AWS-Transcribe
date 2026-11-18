@@ -60,3 +60,39 @@ Build the web app with these environment variables set to the matching stack out
 Create an administrator-managed user in the Cognito user pool and deliver the temporary password securely. On first sign-in, the app prompts the user to set a new password. Never put AWS access keys or secret keys in Vite environment variables or browser code.
 
 Set the SAM parameter `AllowedOrigin` to the exact HTTPS origin of the deployed website before production. Do not leave it as `*` for production. The Cognito pool and app client are billable/subject to AWS pricing and account quotas; review the account's region and costs before deployment.
+
+
+## First AWS deployment (AWS CloudShell)
+
+The SAM stack now provisions the private web bucket and CloudFront distribution as well as the API, Cognito, S3 upload bucket, DynamoDB table, SQS queues, and Lambda functions.
+
+1. Open AWS CloudShell in the `ap-southeast-2` region and confirm the signed-in AWS identity has permission to create CloudFormation, IAM roles, Lambda, API Gateway, Cognito, S3, SQS, DynamoDB, Transcribe, Translate, and CloudFront resources.
+2. Run:
+
+```bash
+git clone https://github.com/nut2rqqs/AWS-Transcribe.git
+cd AWS-Transcribe/backend
+npm install
+sam build
+sam deploy --guided --region ap-southeast-2
+```
+
+3. Review the change set and approve the stack creation. This creates billable AWS resources. Keep the stack name and region for later updates.
+4. Copy the stack outputs: `ApiBaseUrl`, `CognitoUserPoolId`, `CognitoUserPoolClientId`, `WebBucketName`, and `CloudFrontDistributionId`.
+5. Create an administrator-managed user in Amazon Cognito. Use the user pool from `CognitoUserPoolId`; set the email as the username and deliver the temporary password securely.
+6. In CloudShell, build and publish the website using the stack outputs:
+
+```bash
+cd ../
+export VITE_API_BASE_URL="PASTE_ApiBaseUrl"
+export VITE_COGNITO_USER_POOL_ID="PASTE_CognitoUserPoolId"
+export VITE_COGNITO_CLIENT_ID="PASTE_CognitoUserPoolClientId"
+npm install
+npm run build
+aws s3 sync dist/ "s3://PASTE_WebBucketName" --delete
+aws cloudfront create-invalidation --distribution-id "PASTE_CloudFrontDistributionId" --paths "/*"
+```
+
+7. Open the `WebsiteUrl` stack output and sign in with the Cognito account. On first sign-in, enter the temporary password and choose a new password.
+
+The browser receives only Cognito tokens and short-lived presigned upload/download URLs; AWS access keys remain server-side. Do not paste credentials or temporary passwords into chat. If deployment reports an IAM permission error, stop and review the missing permission rather than broadening the policy blindly.
