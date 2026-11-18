@@ -15,6 +15,26 @@ jobs:
     name: Verify AWS access key authentication
     runs-on: ubuntu-latest
     steps:
+      - name: Check required GitHub secrets are available
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          missing=0
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+            echo "::error::Repository secret AWS_ACCESS_KEY_ID is missing or unavailable to this workflow."
+            missing=1
+          else
+            echo "AWS_ACCESS_KEY_ID is available."
+          fi
+          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "::error::Repository secret AWS_SECRET_ACCESS_KEY is missing or unavailable to this workflow."
+            missing=1
+          else
+            echo "AWS_SECRET_ACCESS_KEY is available."
+          fi
+          exit "$missing"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
