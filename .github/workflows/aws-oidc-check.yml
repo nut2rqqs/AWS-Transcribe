@@ -1,0 +1,27 @@
+name: AWS OIDC Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/aws-oidc-check.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify-aws-identity:
+    name: Verify GitHub OIDC role assumption
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::848716766649:role/GitHubActions-AWSTranscribe
+          aws-region: ap-southeast-2
+          role-session-name: GitHubActionsAWSTranscribe
+
+      - name: Verify assumed AWS identity
+        run: aws sts get-caller-identity
