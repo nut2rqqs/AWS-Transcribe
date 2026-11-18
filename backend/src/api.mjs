@@ -46,7 +46,7 @@ async function refreshJob(job) {
       TableName:table, Key:{jobId:job.jobId},
       UpdateExpression:'SET #status = :failed, errorMessage = :message, updatedAt = :now',
       ExpressionAttributeNames:{'#status':'status'},
-      ExpressionAttributeValues:{':failed':'FAILED',':message:transcription.FailureReason || 'Amazon Transcribe could not process this file.',':now':new Date().toISOString()}
+      ExpressionAttributeValues:{':failed':'FAILED',':message':transcription.FailureReason || 'Amazon Transcribe could not process this file.',':now':new Date().toISOString()}
     }));
     return { ...job, status:'FAILED', errorMessage:transcription.FailureReason || 'Amazon Transcribe could not process this file.' };
   }
